@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Desktop Stream — Test Client</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #0d0f12; color: #e6e8ea;
+    font: 14px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; flex: none;
+    padding: 8px 14px;
+    padding-left: calc(14px + env(safe-area-inset-left));
+    padding-right: calc(14px + env(safe-area-inset-right));
+    padding-top: calc(8px + env(safe-area-inset-top));
+    border-bottom: 1px solid #1e242b; background: #11151a;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; flex: none; }
+  .dot.on { background: #36d399; box-shadow: 0 0 8px #36d39988; }
+  .dot.warn { background: #fbbd23; }
+  h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .04em; }
+  #state { margin-left: auto; color: #7c8693; font-size: 12px; }
+
+  /* レイアウト: 画面の向きで配置を切り替えるグリッド */
+  #app {
+    flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px;
+    padding: 10px;
+    padding-left: calc(10px + env(safe-area-inset-left));
+    padding-right: calc(10px + env(safe-area-inset-right));
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+  /* 縦向き: プレーヤーは固定サイズ、rightcolが残り高さを占めてタブ内でスクロール */
+  #rightcol { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  /* タブバー */
+  #tabbar {
+    display: flex; gap: 5px; background: #0f1419; border: 1px solid #1e242b;
+    border-radius: 8px; padding: 3px; flex: none;
+  }
+  .tab-btn {
+    flex: 1; padding: 8px; min-height: 40px; border-radius: 6px; border: none; background: transparent;
+    color: #9aa4b0; font-size: 12px; font-weight: 600; cursor: pointer; text-align: center;
+    touch-action: manipulation;
+  }
+  .tab-btn.active { background: #1c3a2e; color: #dff3e8; }
+  /* タブ本体: 残り高さを使い、はみ出したらスクロール */
+  .tabpage { flex: 1; min-height: 0; display: none; flex-direction: column; gap: 10px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .tabpage.active { display: flex; }
+  /* 横向き: プレーヤーを左、タブ類を右に並べて高さを稼ぐ。
+     min-width を併用し、縦持ちでOSキーボードが開いて高さ<幅になった際の
+     「見かけ上のlandscape化」でレイアウトが飛ぶのを防ぐ */
+  @media (orientation: landscape) and (min-width: 600px) {
+    #app {
+      flex-direction: row; flex-wrap: nowrap;
+    }
+    .stage { flex: 0 1 auto; height: 100%; max-height: 100%; width: auto; max-width: 58%; }
+    #rightcol { flex: 1 1 320px; min-width: 280px; }
+  }
+  /* 縦持ち・狭い画面: タブバーを下部に配置して親指で届きやすく */
+  @media (orientation: portrait), (max-width: 599px) {
+    #tabbar { order: 9; }
+  }
+  .stage {
+    position: relative; background: #000; border: 1px solid #1e242b;
+    border-radius: 8px; overflow: hidden; aspect-ratio: 16/9; width: 100%; align-self: start; flex: 0 0 auto;
+  }
+  video { width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
+  .hint {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: #5b6573; font-size: 13px; pointer-events: none;
+  }
+  /* 仮想ポインタ: 見やすい二重リング */
+  #zoomLayer { position:absolute; inset:0; transform-origin:0 0; }
+  #zoomLayer video { width:100%; height:100%; }
+  #vptr {
+    position: absolute; left: 50%; top: 50%;
+    width: 10px; height: 10px; margin: -5px 0 0 -5px;
+    border: 2px solid #36d399; border-radius: 50%;
+    box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 0 8px #36d399;
+    background: rgba(54,211,153,.15);
+    pointer-events: none; display: none; z-index: 5;
+    transition: transform .04s linear;
+  }
+  #vptr.on { display: block; }
+  #vptr.click { transform: scale(.6); border-color: #fbbd23; box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 0 12px #fbbd23; }
+  #vptr.right { border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 0 12px #60a5fa; }
+  #vptr.drag { border-color: #f472b6; background: rgba(244,114,182,.3); box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 0 14px #f472b6; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  /* 主操作: ボタンを少し大きく、押しやすく */
+  .primary-controls button {
+    padding: 8px 12px; font-size: 13px;
+  }
+  .primary-controls { gap: 6px; }
+  /* 状態ガイド: 今すべきことを1行で示す */
+  #guide {
+    font-size: 12.5px; color: #9aa4b0; padding: 7px 11px; border-radius: 7px;
+    background: #0f1419; border: 1px solid #1e242b; border-left: 3px solid #2f6b4f;
+  }
+  #guide.warn { border-left-color: #b5892f; color: #d8c48a; }
+  #guide.err  { border-left-color: #a33; color: #e0a0a0; }
+  #guide.ok   { border-left-color: #2f6b4f; color: #9fd8b8; }
+
+  /* 設定タブ: 各項目を縦に積む。スマホで指が届きやすい大きめUI */
+  .settings-list { display: flex; flex-direction: column; gap: 14px; }
+  .setting-card {
+    background: #0f1419; border: 1px solid #1e242b; border-radius: 10px; padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .setting-card > .sc-label { color: #b6c0cc; font-size: 13px; font-weight: 600; }
+  .setting-card > .sc-desc { color: #6f7a86; font-size: 11px; margin-top: -4px; }
+  .setting-card .sc-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .fld { display: flex; flex-direction: column; gap: 4px; }
+  .fld-inline { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 45%; min-width: 150px; }
+  .fld-inline select { flex: 1; width: auto; min-width: 0; max-width: none; }
+  .in-unit { display: inline-flex; align-items: center; gap: 6px; }
+  .unit { color: #6f7a86; font-size: 12px; }
+  #roomState { font-size: 12px; color: #9aa4b0; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  button {
+    appearance: none; border: 1px solid #2a323b; background: #161b21; color: #e6e8ea;
+    padding: 7px 10px; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer;
+    min-height: 38px; touch-action: manipulation;
+  }
+  button:hover:not(:disabled) { background: #1d242c; border-color: #3a4450; }
+  button:active:not(:disabled) { background: #232c36; border-color: #3a4450; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: #1c3a2e; border-color: #2f6b4f; }
+  button.danger  { background: #3a1c1f; border-color: #6b2f34; }
+  label { color: #9aa4b0; font-size: 12px; }
+  input[type=number] {
+    width: 88px; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
+    padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px; /* 16px未満はiOSでフォーカス時に画面がズームされる */
+  }
+  .toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; min-height: 36px; }
+  .toggle input[type=checkbox] { width: 20px; height: 20px; }
+  select {
+    background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
+    padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px; width: 100%; max-width: 240px;
+  }
+  /* ヘッダーの再接続ボタン */
+  .hdr-btn { padding: 5px 10px; font-size: 11px; flex: none; min-height: 32px; }
+  header h1 { margin-right: auto; }
+  #stats { font-size: 12px; color: #7cb59c; padding: 6px 8px; background: #0a0d10;
+    border: 1px solid #1e242b; border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
+  #log {
+    min-height: 0; max-height: 120px; overflow: auto; padding: 8px 10px;
+    background: #0a0d10; border: 1px solid #1e242b; border-radius: 6px;
+    font-size: 12px; color: #8b95a1; white-space: pre-wrap; line-height: 1.5;
+  }
+  /* 操作用トラックパッド領域: 操作タブ内で残り高さを埋める */
+  #pad {
+    flex: 1; min-height: 160px; border-radius: 10px;
+    border: 1px dashed #2f6b4f; background: #0f1714;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 12px; touch-action: none; user-select: none;
+  }
+  #padHint { color: #5e7a6c; font-size: 12px; pointer-events: none; }
+  /* iOS: パッド上の長押しでテキスト選択・メニューが出るのを防止 */
+  #pad, #pad * , .stage, .stage * {
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  /* 文字入力パネル: 操作タブ内に常設 */
+  #kbd {
+    background: #11151a; border: 1px solid #2a323b; border-radius: 10px;
+    padding: 10px; display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto;
+  }
+  .kbdrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #kbdText { flex: 1; min-width: 120px; background: #0d1116; border: 1px solid #2a323b;
+    color: #e6e8ea; padding: 8px; border-radius: 6px; font: inherit; font-size: 16px; }
+  .keys button { padding: 6px 8px; font-size: 12px; }
+  /* 全画面時: .stage(映像+ポインタ)を画面いっぱいに、映像はcontainで黒帯 */
+  .stage:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; border: none; border-radius: 0; }
+  .stage:fullscreen video { width: 100%; height: 100%; object-fit: contain; }
+  .stage:-webkit-full-screen { width: 100vw; height: 100vh; border: none; }
+  .stage:-webkit-full-screen video { width: 100%; height: 100%; object-fit: contain; }
+  /* ルームID入力モーダル */
+  #roomModal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 100;
+    display: none; align-items: center; justify-content: center; padding: 16px;
+  }
+  #roomModal.on { display: flex; }
+  #roomBox {
+    background: #11151a; border: 1px solid #2a323b; border-radius: 10px;
+    padding: 16px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 10px;
+  }
+  #roomBox h2 { margin: 0; font-size: 14px; color: #e6e8ea; }
+  #roomBox .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  #roomBox input[type=text] {
+    flex: 1; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
+    padding: 10px; border-radius: 6px; font: inherit; font-size: 16px;
+  }
+  #qrVideoWrap { display: none; }
+  #qrVideoWrap.on { display: block; }
+  #qrVideo { width: 100%; border-radius: 8px; background: #000; }
+  /* 映像上のオーバーレイ操作: 全画面中のみ表示(通常時はタブ内のボタンを使う) */
+  .stage-ov { position: absolute; top: 8px; right: 8px; z-index: 6; display: none; gap: 6px; }
+  .stage:fullscreen .stage-ov { display: flex; }
+  .stage:-webkit-full-screen .stage-ov { display: flex; }
+  .stage-ov button, #zoomReset {
+    min-height: 36px; padding: 6px 10px; font-size: 12px;
+    background: rgba(13,17,22,.72); border: 1px solid rgba(58,68,80,.85);
+    border-radius: 6px; backdrop-filter: blur(2px);
+  }
+  /* ピンチズーム中のみ表示されるリセットボタン */
+  #zoomReset { position: absolute; top: 8px; left: 8px; z-index: 6; display: none; }
+  #zoomReset.on { display: block; }
+  /* OSの「視差効果を減らす」設定を尊重 */
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span id="dot" class="dot"></span>
+  <h1>DESKTOP STREAM (REMOTE)</h1>
+  <span id="state" aria-live="polite">disconnected</span>
+  <button id="reconnBtn" class="hdr-btn">再接続</button>
+</header>
+
+<main id="app">
+  <div class="stage">
+    <div id="zoomLayer">
+      <video id="v" autoplay playsinline muted></video>
+      <div id="vptr"></div>
+    </div>
+    <div class="hint" id="hint">Start で配信開始</div>
+    <div class="stage-ov">
+      <button id="ovMute">🔇 音声ON</button>
+      <button id="ovFs" aria-label="全画面切り替え">⛶</button>
+    </div>
+    <button id="zoomReset">1×に戻す</button>
+  </div>
+
+  <div id="rightcol">
+    <!-- 状態ガイド: タブに依存せず常時見える位置に置く -->
+    <div id="guide" role="status" aria-live="polite">接続していません</div>
+    <!-- タブバー -->
+    <div id="tabbar">
+      <button class="tab-btn active" data-tab="operate">🎮 操作</button>
+      <button class="tab-btn" data-tab="settings">⚙ 設定</button>
+      <button class="tab-btn" data-tab="connect">📶 接続</button>
+    </div>
+
+    <!-- 操作タブ -->
+    <div class="tabpage active" id="tab-operate">
+      <div class="controls primary-controls">
+        <button id="start" class="primary" disabled>Start</button>
+        <button id="stop" class="danger" disabled>Stop</button>
+        <button id="unmute">🔇 音声ON</button>
+        <button id="fsBtn">⛶ 全画面</button>
+      </div>
+
+      <div class="controls">
+        <span class="fld-inline"><label for="monSel">画面</label><select id="monSel"><option value="-1">メイン</option></select></span>
+        <span class="fld-inline"><label for="inputModeSel">入力</label><select id="inputModeSel">
+          <option value="pad" selected>🖱 トラックパッド</option>
+          <option value="kbd">⌨ 文字入力</option>
+        </select></span>
+      </div>
+
+      <!-- 文字入力 -->
+      <div id="kbd">
+        <div class="kbdrow">
+          <input id="kbdText" type="text" placeholder="ここに入力して送信(日本語OK)" />
+          <button id="kbdSend" class="primary">送信</button>
+          <span class="toggle"><input id="kbdEnter" type="checkbox" /><label for="kbdEnter">+Enter</label></span>
+        </div>
+        <div class="kbdrow keys">
+          <button data-key="enter">Enter</button>
+          <button data-key="tab">Tab</button>
+          <button data-key="esc">Esc</button>
+          <button data-key="backspace">BS</button>
+          <button data-key="up">↑</button>
+          <button data-key="down">↓</button>
+          <button data-key="left">←</button>
+          <button data-key="right">→</button>
+          <button data-key="ctrl+c">Ctrl+C</button>
+          <button data-key="ctrl+v">Ctrl+V</button>
+          <button data-key="alt+tab">Alt+Tab</button>
+          <button data-key="win">Win</button>
+          <button data-key="shift+rclick">Shift+右click</button>
+        </div>
+      </div>
+
+      <!-- トラックパッド -->
+      <div id="pad">
+        <span id="padHint">ここをなぞってポインタ移動 / タップで左クリック / 長押しで右クリック</span>
+      </div>
+    </div>
+
+    <!-- 設定タブ -->
+    <div class="tabpage" id="tab-settings">
+      <div class="settings-list">
+        <div class="setting-card">
+          <span class="sc-label">画質・コーデック</span>
+          <div class="sc-row"><label for="codecSel" style="min-width:64px">codec</label><select id="codecSel"><option value="">接続待ち…</option></select></div>
+          <div class="sc-row"><label for="bitrate" style="min-width:64px">bitrate</label><span class="in-unit"><input id="bitrate" type="number" inputmode="numeric" value="1000" min="200" step="100" /><span class="unit">kbps</span></span></div>
+        </div>
+
+        <div class="setting-card">
+          <span class="sc-label">ネットワーク詳細</span>
+          <span class="sc-desc">通常は変更不要です</span>
+          <div class="sc-row"><label for="mtu" style="min-width:64px">mtu</label><input id="mtu" type="number" inputmode="numeric" value="1000" min="400" max="1400" step="50" /></div>
+          <div class="sc-row"><label for="buffer" style="min-width:64px">buffer</label><span class="in-unit"><input id="buffer" type="number" inputmode="numeric" value="0" min="0" max="2000" step="50" /><span class="unit">ms</span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 接続タブ -->
+    <div class="tabpage" id="tab-connect">
+      <div class="settings-list">
+        <div class="setting-card">
+          <span class="sc-label">接続設定</span>
+          <div class="sc-row">
+            <button id="roomBtn">ルームID入力</button>
+          </div>
+          <span id="roomState">room: 未設定</span>
+        </div>
+
+        <div class="setting-card">
+          <span class="sc-label">通信状態</span>
+          <div id="stats">stats: —</div>
+        </div>
+
+        <div class="setting-card">
+          <span class="sc-label">ログ</span>
+          <div id="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ルームID入力モーダル: カメラQR / 写真QR / 文字入力 の3択 -->
+<div id="roomModal">
+  <div id="roomBox">
+    <h2>ルームIDを設定</h2>
+    <div class="row">
+      <button id="qrCamBtn">📷 カメラ撮影(QR)</button>
+      <button id="qrFileBtn">🖼 写真から(QR)</button>
+    </div>
+    <div id="qrVideoWrap">
+      <video id="qrVideo" playsinline muted></video>
+      <button id="qrCamStop">カメラ停止</button>
+    </div>
+    <input id="qrFile" type="file" accept="image/*" style="display:none" />
+    <div class="row">
+      <input id="roomText" type="text" placeholder="ルームIDを入力" maxlength="64" />
+      <button id="roomTextOk">決定</button>
+    </div>
+    <div class="row">
+      <button id="roomCancel">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- QRデコード用 jsQR。完全に単体化したい場合はこのCDN行を
+     https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js の中身で置き換える(インライン化)。 -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const video = $("v");
+let pc, control, ws;
+let currentCodec = "qsv-h264"; // クライアントが選択中のコーデック
+let pendingStart = false;  // Startによる再接続中フラグ（control open時に自動start）
+let serverCPU = -1;        // サーバーCPU使用率(control経由で受信)
+let roomId = localStorage.getItem("dss_room") || ""; // ルームID(保存して再利用)
+let waitTimer = null; // サーバー不在検出用(入室後offerが来ない場合の案内)
+
+function log(...a){ const el=$("log"); el.textContent += a.join(" ")+"\n"; el.scrollTop=el.scrollHeight; }
+function setState(s, cls){
+  $("state").textContent = s; $("dot").className = "dot" + (cls? " "+cls : "");
+  updateGuide(s, cls);
+}
+// 状態ガイド: 今なにをすべきかを平易に1行で示す。
+function updateGuide(s, cls){
+  const g = $("guide"); if (!g) return;
+  let text = "", tone = "";
+  if (!roomId) { text = "ルームIDを設定してください（「📶 接続」タブ → ルームID入力）"; tone = "warn"; }
+  else if (s === "disconnected" || s === "" ) { text = "「再接続」で接続できます"; tone = ""; }
+  else if (s === "signaling") { text = "接続中…"; tone = "warn"; }
+  else if (s === "reconnecting") { text = "再接続中…（数秒お待ちください）"; tone = "warn"; }
+  else if (s === "waiting server") { text = "サーバーの応答を待っています…"; tone = "warn"; }
+  else if (s === "no server") { text = "サーバーが見つかりません。サーバーの起動状態と、ルームIDがサーバーと一致しているか確認してください（サーバー側で再生成・再配置した場合はIDが変わります）"; tone = "err"; }
+  else if (s === "認証拒否" || cls === "err") { text = "接続できませんでした。サーバー側で承認が必要な場合があります"; tone = "err"; }
+  else if (s === "connected") {
+    if (!authed) { text = "認証中…（初回はサーバーPCで承認してください）"; tone = "warn"; }
+    else if ($("stop").disabled) { text = "「Start」で配信を開始できます"; tone = "ok"; }
+    else { text = "配信中"; tone = "ok"; }
+  } else { text = s; tone = cls === "on" ? "ok" : ""; }
+  g.textContent = text;
+  g.className = tone;
+}
+function updateRoomState(){
+  $("roomState").textContent = roomId ? ("room: " + roomId.slice(0,8) + "…") : "room: 未設定";
+  updateGuide($("state").textContent, $("dot").className.replace("dot","").trim());
+}
+
+// --- Ayame Labo シグナリング ---
+// register → accept(isExistClient) → offer/answer/candidate交換。ping には pong を返す。
+const AYAME_URL = "wss://ayame-labo.shiguredo.app/signaling";
+
+function connect() {
+  if (!roomId) { setState("no room", "warn"); log("ルームIDを設定してください"); return; }
+  ws = new WebSocket(AYAME_URL);
+  ws.onopen  = () => {
+    setState("signaling", "warn"); log("ayame open");
+    ws.send(JSON.stringify({ type: "register", roomId: roomId, clientId: "dss-client-" + Date.now() }));
+  };
+  ws.onclose = () => { setState("disconnected"); log("ayame close"); };
+  ws.onerror = (e) => log("ayame error");
+  ws.onmessage = async (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "ping") { ws.send(JSON.stringify({ type: "pong" })); return; }
+    if (m.type === "accept") {
+      log("ayame accepted (isExistClient=" + m.isExistClient + ")");
+      await setupPeer();
+      if (m.isExistClient) {
+        // 相手(サーバー)が既に居る → こちらがoffer側。
+        // offer側は自分でDataChannelを作る(SDPにチャネル情報を含めるため)。
+        // これをしないとcontrolの開通が遅れ、Startが押せない事象が起きる。
+        const ch = pc.createDataChannel("control");
+        wireControl(ch);
+        const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
+        await pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: "offer", sdp: offer.sdp }));
+        log("offer sent");
+      } else {
+        // isExistClient=false: 入室時点でルームが空 = サーバーがこのルームに居ない。
+        // サーバーが後から入室すればofferが届くので待つが、一定時間来なければ
+        // 「サーバー未起動」か「ルームID不一致」の可能性を案内する。
+        setState("waiting server", "warn");
+        clearTimeout(waitTimer);
+        waitTimer = setTimeout(() => {
+          if ($("state").textContent === "waiting server") setState("no server", "err");
+        }, 8000);
+      }
+      return;
+    }
+    if (m.type === "offer") {
+      clearTimeout(waitTimer);
+      setState("signaling", "warn");
+      if (!pc) await setupPeer();
+      await pc.setRemoteDescription({ type: "offer", sdp: m.sdp });
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+      ws.send(JSON.stringify({ type: "answer", sdp: ans.sdp }));
+      log("answer sent");
+      return;
+    }
+    if (m.type === "answer") {
+      if (pc) await pc.setRemoteDescription({ type: "answer", sdp: m.sdp });
+      return;
+    }
+    if (m.type === "candidate" && m.ice) {
+      try { await pc.addIceCandidate(m.ice); } catch(e){ log("addIce err", e); }
+      return;
+    }
+    if (m.type === "bye") { log("ayame bye"); setState("disconnected"); return; }
+    if (m.type === "reject") { log("ayame reject:", m.reason||""); setState("rejected", "err"); return; }
+  };
+}
+
+async function setupPeer() {
+  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+
+  pc.onicecandidate = (e) => {
+    if (!e.candidate) { log("ICE: 候補収集完了"); return; }
+    const c = e.candidate;
+    log("ICE send:", `${c.type||"?"} ${(c.address||"").toString().slice(0,32)}`);
+    ws.send(JSON.stringify({ type: "candidate", ice: c }));
+  };
+  pc.oniceconnectionstatechange = () => { log("ICE:", pc.iceConnectionState); };
+  pc.onconnectionstatechange = () => {
+    log("pc", pc.connectionState);
+    if (pc.connectionState === "connected") { setState("connected", "on"); logSelectedRoute(); }
+    if (pc.connectionState === "failed") setState("failed", "err");
+  };
+  pc.ontrack = (e) => {
+    if (video.srcObject !== e.streams[0]) {
+      video.srcObject = e.streams[0];
+      log("track:", e.track.kind);
+    }
+    applyBuffer(); // 受信トラックにバッファ設定を反映
+    // モバイルの自動再生制限対策: まずミュートで再生を通す。
+    video.muted = true;
+    setMuteLabel(); // ミュート状態に合わせてボタン表示も戻す
+    video.play().then(() => {
+      log("playing (muted)");
+    }).catch((err) => {
+      log("play failed:", err.name);
+    });
+  };
+  // control チャネルの配線（自分で作った場合・相手から受けた場合の両方で使う）。
+  pc.ondatachannel = (e) => { wireControl(e.channel); };
+}
+
+// --- 公開鍵認証(自前パスキー) ---
+// 初回に ECDSA P-256 鍵ペアを生成し、秘密鍵をlocalStorageに保存(JWK)。公開鍵(SPKI)をサーバーへ。
+// サーバーのチャレンジに秘密鍵で署名して返す。秘密は回線に流れない。
+const DSS_SK = "dss_authkey_v1";
+async function getKeyPair(){
+  const saved = localStorage.getItem(DSS_SK);
+  if (saved) {
+    try {
+      const jwk = JSON.parse(saved);
+      const priv = await crypto.subtle.importKey("jwk", jwk.priv, {name:"ECDSA",namedCurve:"P-256"}, false, ["sign"]);
+      return { priv, pubSpki: jwk.pubSpki };
+    } catch(e){ /* 壊れていたら作り直す */ }
+  }
+  const kp = await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"}, true, ["sign","verify"]);
+  const privJwk = await crypto.subtle.exportKey("jwk", kp.privateKey);
+  const spki = await crypto.subtle.exportKey("spki", kp.publicKey);
+  const pubSpki = btoa(String.fromCharCode(...new Uint8Array(spki)));
+  // 秘密鍵JWKは extractable:false で再インポートできるよう、保存用に別途エクスポート
+  localStorage.setItem(DSS_SK, JSON.stringify({ priv: privJwk, pubSpki }));
+  const priv = await crypto.subtle.importKey("jwk", privJwk, {name:"ECDSA",namedCurve:"P-256"}, false, ["sign"]);
+  return { priv, pubSpki };
+}
+function b64ToBytes(b64){ return Uint8Array.from(atob(b64), c=>c.charCodeAt(0)); }
+async function signChallenge(priv, challengeB64){
+  const data = b64ToBytes(challengeB64);
+  const sig = await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"}, priv, data);
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+let authKeys = null;      // {priv, pubSpki}
+let authed = false;       // 認証成立フラグ
+async function startAuth(){
+  authed = false;
+  if (!authKeys) authKeys = await getKeyPair();
+  const label = (localStorage.getItem("dss_devname") || (navigator.platform||"device")).slice(0,40);
+  sendControl({ type:"hello", pubKey: authKeys.pubSpki, label });
+  log("認証開始(端末鍵を提示)");
+}
+
+function wireControl(ch) {
+  control = ch;
+  control.onopen = () => {
+    log("control open (認証待ち)");
+    $("start").disabled = true; // 認証成立まで無効
+  };
+  control.onclose = () => { $("start").disabled = true; $("stop").disabled = true; };
+  control.onmessage = (ev) => {
+    try {
+      const m = JSON.parse(ev.data);
+      if (m.type === "authRequired") { startAuth(); return; }
+      if (m.type === "challenge") {
+        signChallenge(authKeys.priv, m.challenge).then(sig => {
+          sendControl({ type:"authResponse", sig });
+        });
+        return;
+      }
+      if (m.type === "authResult") {
+        if (m.ok) {
+          authed = true; setState("connected","on"); log("認証成立"); $("start").disabled = false;
+          if (pendingStart) {
+            pendingStart = false;
+            sendControl({ type: "start", bitrate: +$("bitrate").value, codec: currentCodec, mtu: +$("mtu").value, monitor: parseInt($("monSel").value, 10) });
+            $("hint").style.display = "none";
+            $("start").disabled = true; $("stop").disabled = false;
+          }
+          updateGuide("connected","on"); // Start/Stopの最終状態を反映
+        }
+        else { authed = false; setState("認証拒否","err"); log("認証拒否: " + (m.reason||"")); $("start").disabled = true; }
+        return;
+      }
+      if (m.type === "cpu") { serverCPU = m.server; }
+      if (m.type === "encoders" && Array.isArray(m.list)) {
+        const sel = $("codecSel");
+        const prev = currentCodec;
+        sel.innerHTML = "";
+        for (const e of m.list) {
+          const o = document.createElement("option");
+          o.value = e.id; o.textContent = e.label;
+          sel.appendChild(o);
+        }
+        // 以前の選択が使えるなら維持、無ければ先頭
+        if (m.list.some(e => e.id === prev)) { sel.value = prev; }
+        else if (m.list.length) { currentCodec = m.list[0].id; sel.value = currentCodec; }
+        log("encoders: " + m.list.map(e=>e.id).join(", "));
+      }
+      if (m.type === "monitors" && Array.isArray(m.list)) {
+        const sel = $("monSel");
+        const prev = sel.value;
+        sel.innerHTML = "";
+        for (const mon of m.list) {
+          const o = document.createElement("option");
+          o.value = mon.index; o.textContent = mon.label;
+          sel.appendChild(o);
+        }
+        if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+        log("monitors: " + m.list.length + "台");
+      }
+    } catch(e){}
+  };
+}
+
+function sendControl(obj){
+  if (control && control.readyState === "open") control.send(JSON.stringify(obj));
+  else log("control not ready");
+}
+
+// --- 文字入力(A+C方式) ---
+// テキストは一括送信(サーバー側でUnicode注入、日本語OK)。特殊キーはボタンで単発送信。
+function sendText(){
+  const t = $("kbdText").value;
+  if (!t) return;
+  sendControl({ type: "text", text: t });
+  if ($("kbdEnter").checked) sendControl({ type: "key", key: "enter" });
+  $("kbdText").value = "";
+  $("kbdText").focus();
+}
+$("kbdSend").onclick = sendText;
+$("kbdText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); sendText(); }
+});
+document.querySelectorAll("#kbd .keys button").forEach(b => {
+  b.addEventListener("click", () => sendControl({ type: "key", key: b.dataset.key }));
+});
+
+// タブ切り替え(操作/設定)。選択はlocalStorageに保存。
+function switchTab(name){
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tabpage").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
+  localStorage.setItem("dss_tab", name);
+}
+document.querySelectorAll(".tab-btn").forEach(b => {
+  b.addEventListener("click", () => switchTab(b.dataset.tab));
+});
+(function(){
+  const saved = localStorage.getItem("dss_tab") || "operate";
+  switchTab(saved);
+})();
+
+// 入力エリアの入れ替え(トラックパッド ⇔ 文字入力)。どちらか一方だけを表示する。
+// デフォルトはトラックパッド。選択はlocalStorageに保存。
+function applyInputMode(){
+  const mode = $("inputModeSel").value; // "pad" | "kbd"
+  $("pad").style.display = (mode === "pad") ? "" : "none";
+  $("kbd").style.display = (mode === "kbd") ? "" : "none";
+  localStorage.setItem("dss_input_mode", mode);
+}
+$("inputModeSel").addEventListener("change", () => {
+  applyInputMode();
+  // 文字入力に切り替えたら、すぐ打てるように入力欄へフォーカス
+  if ($("inputModeSel").value === "kbd") $("kbdText").focus();
+});
+(function(){
+  const saved = localStorage.getItem("dss_input_mode");
+  if (saved === "pad" || saved === "kbd") $("inputModeSel").value = saved;
+  applyInputMode();
+})();
+
+// --- ルームID入力（カメラQR / 写真QR / 文字入力）---
+let qrStream = null, qrScanTimer = null;
+
+$("roomBtn").onclick = () => { $("roomModal").classList.add("on"); $("roomText").value = roomId; };
+$("roomCancel").onclick = () => { closeRoomModal(); };
+function closeRoomModal(){
+  $("roomModal").classList.remove("on");
+  stopQrCam();
+}
+function setRoomId(id){
+  id = (id||"").trim();
+  if (!id) return;
+  roomId = id;
+  localStorage.setItem("dss_room", roomId);
+  updateRoomState();
+  log("room set: " + roomId.slice(0,8) + "…");
+  closeRoomModal();
+  reconnect(); // 新しいルームで接続し直す
+}
+
+// 文字入力
+$("roomTextOk").onclick = () => setRoomId($("roomText").value);
+
+// カメラ撮影(QR): getUserMediaで背面カメラ → canvasに描いてjsQRでデコード
+$("qrCamBtn").onclick = async () => {
+  try {
+    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    const v = $("qrVideo");
+    v.srcObject = qrStream;
+    await v.play();
+    $("qrVideoWrap").classList.add("on");
+    const cv = document.createElement("canvas");
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    qrScanTimer = setInterval(() => {
+      if (!v.videoWidth) return;
+      cv.width = v.videoWidth; cv.height = v.videoHeight;
+      ctx.drawImage(v, 0, 0);
+      const img = ctx.getImageData(0, 0, cv.width, cv.height);
+      const code = jsQR(img.data, img.width, img.height);
+      if (code && code.data) { setRoomId(code.data); }
+    }, 300);
+  } catch(e) { log("カメラ起動失敗:", e.name); }
+};
+$("qrCamStop").onclick = () => stopQrCam();
+function stopQrCam(){
+  if (qrScanTimer) { clearInterval(qrScanTimer); qrScanTimer = null; }
+  if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
+  $("qrVideoWrap").classList.remove("on");
+}
+
+// 写真から(QR): ファイル選択 → canvasに描いてjsQRでデコード
+$("qrFileBtn").onclick = () => $("qrFile").click();
+$("qrFile").addEventListener("change", () => {
+  const f = $("qrFile").files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    const cv = document.createElement("canvas");
+    cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, cv.width, cv.height);
+    const code = jsQR(d.data, d.width, d.height);
+    if (code && code.data) setRoomId(code.data);
+    else log("QRが見つかりませんでした");
+  };
+  img.src = URL.createObjectURL(f);
+});
+
+// 接続成立時に、実際に選ばれた候補ペア(経路)をログに出す。
+// host:100.x ならTailscale経由、srflx/prflx ならP2P直結。
+async function logSelectedRoute(){
+  if (!pc) return;
+  try {
+    const stats = await pc.getStats();
+    let sel = null, locals = {}, remotes = {};
+    stats.forEach(r => {
+      if (r.type === "candidate-pair" && (r.selected || (r.nominated && r.state === "succeeded"))) sel = r;
+      if (r.type === "local-candidate") locals[r.id] = r;
+      if (r.type === "remote-candidate") remotes[r.id] = r;
+    });
+    if (sel) {
+      const lc = locals[sel.localCandidateId], rc = remotes[sel.remoteCandidateId];
+      const f = (c) => c ? `${c.candidateType}:${c.address||c.ip||"?"}` : "?";
+      log("ICE 経路:", f(lc), "->", f(rc));
+    }
+  } catch(e){}
+}
+
+// ディスプレイ切り替え: 接続を張り直して確実に反映する(即時config切替は不安定なため)。
+// 配信中だった場合は再接続後に自動でStartし、startメッセージのmonitorで新モニタから開始する。
+$("monSel").addEventListener("change", () => {
+  log("display -> " + $("monSel").selectedOptions[0].textContent + " / 再接続");
+  if (!$("stop").disabled) pendingStart = true; // 配信中なら再開まで自動で行う
+  reconnect();
+});
+
+// 再接続ボタン: 接続がおかしいとき(Startが押せない等)に手動で張り直す
+$("reconnBtn").onclick = () => {
+  log("手動再接続");
+  reconnect();
+};
+
+// Start は接続を張り直してから配信開始する（Stop/Start繰り返しで音声が止まる問題の回避）。
+// コーデック切り替えと同じく、毎回新しいトラックで始めるためトラックの不連続が起きない。
+$("start").onclick = () => {
+  pendingStart = true;
+  log("start -> reconnect");
+  reconnect(); // 再接続後、control open で自動的に start を送る
+};
+// 音声のオン/オフは「音声ON/OFF」ボタンのみで行う(映像タップでは切り替えない)。
+$("unmute").onclick = () => { toggleMute(); };
+$("ovMute").onclick = () => { toggleMute(); };
+function toggleMute(){
+  video.muted = !video.muted;
+  if (!video.muted) {
+    video.play().then(() => log("audio on")).catch((err) => log("play failed:", err.name));
+  }
+  setMuteLabel();
+}
+// 操作タブ内と映像オーバーレイの音声ボタン表示を常に同期する
+function setMuteLabel(){
+  const t = video.muted ? "🔇 音声ON" : "🔊 音声OFF";
+  $("unmute").textContent = t;
+  $("ovMute").textContent = t;
+}
+
+// コーデック切り替え: 設定を変えるだけ。次回 Start 時に反映される。
+$("codecSel").addEventListener("change", () => {
+  currentCodec = $("codecSel").value;
+  log("codec -> " + currentCodec + " / 再接続");
+  reconnect(); // トラックは接続時に固定なので、コーデック変更は接続を張り直す
+});
+
+function reconnect() {
+  // 既存の接続を破棄して作り直す。
+  try { if (control) control.close(); } catch(e){}
+  try { if (pc) pc.close(); } catch(e){}
+  try { if (ws) ws.close(); } catch(e){}
+  control = null; pc = null;
+  video.srcObject = null;
+  $("start").disabled = true; $("stop").disabled = true;
+  $("hint").style.display = "";
+  // サーバーはbye受信後、Ayameのルームに入り直すまで約1秒かかる。
+  // 入れ違い(isExistClient=false)を避けるため少し待ってから接続する。
+  setState("reconnecting", "warn");
+  log("再接続中…");
+  setTimeout(connect, 3000);
+}
+$("stop").onclick = () => {
+  sendControl({ type: "stop" });
+  $("start").disabled = false; $("stop").disabled = true;
+  updateGuide("connected", "on");
+};
+
+// --- マウス操作: 仮想ポインタ方式 + 入力元切替（要件12） ---
+// 仮想ポインタは常に映像(.stage)上に表示。座標基準も常に .stage。
+// 入力元: 全画面時=映像エリア / 非全画面時=専用パッド。
+// 移動中はサーバーに何も送らず、タップ時だけ正規化座標でクリック送信。
+function mouseEnabled(){ return true; } // マウス操作は常時ON(チェックボックスは廃止)
+const vptr = $("vptr");
+const stage = document.querySelector(".stage");
+const pad = $("pad");
+
+let vpx = 0, vpy = 0;       // 仮想ポインタ座標(映像コンテンツ基準px)
+let tpActive = false, tpLast = null, tpMoved = 0, tpStartTime = 0;
+let lpTimer = null, lpFired = false; // 長押し(右クリック)用
+let dragging = false;       // ドラッグ状態(左ボタン押しっぱなし)
+let lastTapUp = 0;          // 直前タップの離した時刻(ドラッグ入り判定用)
+let moveThrottle = 0;       // ドラッグ中の移動送信の間引き
+let secondPress = false;    // 直前タップ直後の2度目押下か(押下時に確定)
+let dragArmTimer = null;    // 2度目押下を保持したらドラッグ開始するタイマー
+let pendClickTimer = null;  // 1タップ目のクリック保留タイマー
+let pendingClick = false;   // 保留中クリックが有効か(タイマーと分離して2度目押下で確実に止める)
+let firstTapPos = null;     // 1タップ目の座標(コンテンツ基準)。ドラッグはここから開始
+const SENS = 0.75;          // 感度(移動速度)
+const TAP_MOVE = 12;        // タップ判定の移動上限(px)
+const TAP_TIME = 300;       // タップ判定の時間上限(ms)
+const LONGPRESS = 1000;     // 長押し=右クリック判定(ms)
+const DRAG_HOLD = 180;      // 2度目の押下をこの時間以上保持で「ドラッグ入り」
+const DBL_WINDOW = 350;     // 直前タップからこの時間内の2度目押下を連続とみなす
+
+function isFs(){ return document.fullscreenElement === stage || document.webkitFullscreenElement === stage; }
+
+// 実際に映像が表示されている矩形(stage内のオフセットとサイズ)を返す。
+// 非全画面: 映像はstage全面(fill)。全画面: contain によるレターボックスを計算。
+function videoRect(){
+  const r = stage.getBoundingClientRect();
+  if (!isFs()) return { ox:0, oy:0, w:r.width, h:r.height };
+  const vw = video.videoWidth || 16, vh = video.videoHeight || 9;
+  const ar = vw/vh, sar = r.width/r.height;
+  let w, h;
+  if (sar > ar){ h = r.height; w = h*ar; } else { w = r.width; h = w/ar; }
+  return { ox:(r.width-w)/2, oy:(r.height-h)/2, w, h };
+}
+function clampPtr(){
+  const v = videoRect();
+  vpx = Math.max(0, Math.min(v.w, vpx));
+  vpy = Math.max(0, Math.min(v.h, vpy));
+}
+function drawPtr(){
+  const v = videoRect();
+  vptr.style.left = (v.ox + vpx)+"px";
+  vptr.style.top  = (v.oy + vpy)+"px";
+}
+
+// 仮想ポインタの表示位置を更新(全画面切り替え時のレターボックス補正を含む)
+function updateMouseUI(){
+  vptr.classList.add("on");
+  const v = videoRect();
+  if (vpx === 0 && vpy === 0){ vpx = v.w/2; vpy = v.h/2; }
+  clampPtr(); drawPtr();
+}
+
+document.addEventListener("fullscreenchange", updateMouseUI);
+document.addEventListener("webkitfullscreenchange", updateMouseUI);
+
+// 全画面ボタン: .stage(映像+ポインタ)を全画面化
+function toggleFs(){
+  if (isFs()){
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else {
+    (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage);
+  }
+}
+$("fsBtn").onclick = toggleFs;
+$("ovFs").onclick = toggleFs;
+
+function sendMouse(action, button){
+  const v = videoRect();
+  sendControl({ type:"mouse", action: action, button: button||"left", x: vpx/v.w, y: vpy/v.h });
+}
+function sendClick(button){
+  const v = videoRect();
+  sendControl({ type:"mouse", action:"click", button: button, x: vpx/v.w, y: vpy/v.h });
+  vptr.classList.add(button === "right" ? "right" : "click");
+  setTimeout(() => vptr.classList.remove("click","right"), 150);
+}
+
+// 入力ハンドラを指定要素に取り付ける。activeFn が true のときだけ反応。
+function attachPointer(el, activeFn){
+  el.addEventListener("pointerdown", (ev) => {
+    if (!mouseEnabled() || !activeFn()) return;
+    ev.preventDefault();
+    tpActive = true; lpFired = false;
+    tpLast = { x: ev.clientX, y: ev.clientY };
+    tpMoved = 0; tpStartTime = Date.now();
+    try { el.setPointerCapture(ev.pointerId); } catch(e){}
+    // この押下が「直前タップ直後の2度目押下」か。
+    secondPress = (Date.now() - lastTapUp) < DBL_WINDOW;
+    clearTimeout(lpTimer);
+    clearTimeout(dragArmTimer);
+    // 2度目押下が始まった時点で、1タップ目の保留クリックの発火を止める。
+    // (これをしないと保持中に保留クリックが発火し、座標記憶が消え、ダブルクリックも併発する)
+    if (secondPress) clearTimeout(pendClickTimer);
+    if (secondPress && !dragging) {
+      // 2度目押下: 保持時間(DRAG_HOLD)到達した瞬間にドラッグ開始(指はまだ画面上)。
+      // 途中で大きく動いたら発火前にキャンセル(単なるポインタ移動として扱う)。
+      dragArmTimer = setTimeout(() => {
+        if (tpActive && !dragging) {
+          // 保留中の1タップ目クリックを破棄(ダブルクリック併発の防止)。
+          clearTimeout(pendClickTimer); pendClickTimer = null; pendingClick = false;
+          // 1タップ目の座標(=掴みたい対象の位置)で down する。
+          if (firstTapPos) { vpx = firstTapPos.x; vpy = firstTapPos.y; clampPtr(); drawPtr(); }
+          sendMouse("move");
+          sendMouse("down", "left"); // 左ボタン押下(保持)
+          dragging = true;
+          lastTapUp = 0;
+          vptr.classList.add("drag");
+        }
+      }, DRAG_HOLD);
+    } else if (!dragging) {
+      // 1度目押下: 長押しで右クリック。
+      lpTimer = setTimeout(() => {
+        if (tpActive && tpMoved < TAP_MOVE){ lpFired = true; sendClick("right"); }
+      }, LONGPRESS);
+    }
+  });
+  el.addEventListener("pointermove", (ev) => {
+    if (!mouseEnabled() || !tpActive || !activeFn()) return;
+    const dx = (ev.clientX - tpLast.x) * SENS;
+    const dy = (ev.clientY - tpLast.y) * SENS;
+    tpLast = { x: ev.clientX, y: ev.clientY };
+    tpMoved += Math.abs(dx) + Math.abs(dy);
+    if (tpMoved >= TAP_MOVE) {
+      clearTimeout(lpTimer);                       // 1度目押下の長押し(右クリック)は動いたら取消
+      if (!secondPress) clearTimeout(dragArmTimer); // ただし2度目押下は動いてもドラッグ発火を維持(すぐ動かしてもドラッグ可)
+    }
+    vpx += dx; vpy += dy;
+    clampPtr(); drawPtr();
+    // ドラッグ中は移動を随時サーバーへ送る(左ボタン押下のまま追従)。間引きする。
+    if (dragging) {
+      const now = Date.now();
+      if (now - moveThrottle > 40) { moveThrottle = now; sendMouse("move"); }
+    }
+  });
+  el.addEventListener("pointerup", (ev) => {
+    if (!mouseEnabled() || !activeFn()) return;
+    clearTimeout(lpTimer);
+    clearTimeout(dragArmTimer);
+    const dt = Date.now() - tpStartTime;
+    tpActive = false;
+    if (lpFired) return; // 右クリック済み
+
+    // ドラッグ中に指を離したらドロップ(左ボタンを離す)。
+    if (dragging) {
+      sendMouse("move");          // 最終位置へ移動
+      sendMouse("up", "left");    // ドロップ
+      dragging = false;
+      vptr.classList.remove("drag");
+      return;
+    }
+
+    const now = Date.now();
+    if (tpMoved < TAP_MOVE && dt < TAP_TIME) {
+      if (secondPress && pendingClick) {
+        // 速い2連続タップ = ダブルクリック: 保留分＋今回分を即時送信(遅延なし)
+        clearTimeout(pendClickTimer); pendClickTimer = null; pendingClick = false;
+        sendClick("left"); sendClick("left");
+        lastTapUp = 0; firstTapPos = null;
+      } else {
+        // 1タップ目: クリックを保留し、2度目押下(ドラッグ)が来なければ送信。
+        // ドラッグはこのタップ位置から始まるよう座標を記憶する。
+        firstTapPos = { x: vpx, y: vpy };
+        pendingClick = true;
+        lastTapUp = now;
+        clearTimeout(pendClickTimer);
+        pendClickTimer = setTimeout(() => {
+          if (!pendingClick) return;
+          pendClickTimer = null; pendingClick = false; firstTapPos = null;
+          sendClick("left"); // 通常の単発クリック(DBL_WINDOW待ちの遅延あり)
+        }, DBL_WINDOW);
+      }
+    } else if (secondPress && pendingClick) {
+      // 2度目押下が保持もタップも成立せず終わった(大きく動かした等):
+      // 保留クリックは破棄して状態を掃除する。
+      pendingClick = false; firstTapPos = null;
+    }
+  });
+  el.addEventListener("contextmenu", (ev) => { if (mouseEnabled()) ev.preventDefault(); });
+}
+
+// 映像エリアは「全画面時」だけ有効、パッドは「非全画面時」だけ有効
+attachPointer(video, () => true);   // プレーヤーは常時操作可(通常時/全画面とも)
+attachPointer(pad, () => !isFs());  // パッドは通常時のみ
+
+// --- バッファ調整(playoutDelayHint) と 実測値表示(getStats) ---
+// buffer欄(ms): 0=ブラウザ自動。>0で受信トラックの再生遅延の下限ヒントを与える。
+//   大きくするとジッタ吸収↑(滑らか)・遅延↑。小さいと低遅延・カクつきやすい。
+function applyBuffer(){
+  if (!pc) return;
+  const ms = +$("buffer").value;
+  if (ms <= 0) return; // 0は自動(ヒント未設定)
+  pc.getReceivers().forEach(r => { try { r.playoutDelayHint = ms/1000; } catch(e){} });
+}
+$("buffer").addEventListener("change", applyBuffer);
+
+// 実測のジッタバッファ遅延・選択経路などを2秒ごとに表示。
+async function pollStats(){
+  if (!pc || pc.connectionState !== "connected") { $("stats").textContent = "stats: —"; return; }
+  try {
+    const stats = await pc.getStats();
+    const parts = [];
+    let sel = null, locals = {}, remotes = {};
+    stats.forEach(r => {
+      if (r.type === "inbound-rtp" && (r.kind === "video" || r.kind === "audio")) {
+        const jb = (r.jitterBufferDelay && r.jitterBufferEmittedCount)
+          ? Math.round(r.jitterBufferDelay / r.jitterBufferEmittedCount * 1000) : 0;
+        const tag = r.kind === "video" ? "V" : "A";
+        const res = (r.kind === "video" && r.frameWidth) ? ` ${r.frameWidth}x${r.frameHeight}` : "";
+        parts.push(`${tag}${res} buf:${jb}ms lost:${r.packetsLost||0}`);
+      }
+      if (r.type === "candidate-pair" && (r.selected || r.nominated && r.state === "succeeded")) sel = r;
+      if (r.type === "local-candidate") locals[r.id] = r;
+      if (r.type === "remote-candidate") remotes[r.id] = r;
+    });
+    // サーバーCPU使用率（control経由で受信した最新値）
+    if (serverCPU >= 0) parts.push(`srvCPU:${Math.round(serverCPU)}%`);
+    // 選択中の経路（どのIP/種別で繋がっているか）を表示
+    if (sel) {
+      const lc = locals[sel.localCandidateId], rc = remotes[sel.remoteCandidateId];
+      const fmt = (c) => c ? `${c.candidateType}:${c.address||c.ip||"?"}` : "?";
+      parts.push(`route ${fmt(lc)} -> ${fmt(rc)}`);
+    }
+    if (parts.length) $("stats").textContent = "stats: " + parts.join("  |  ");
+  } catch(e){}
+}
+setInterval(pollStats, 2000);
+
+// --- ピンチズーム(2本指) ---
+// 2本指ピンチで映像を拡大(1〜4倍)、2本指ドラッグでパン。1本指は従来のポインタ操作。
+// 表示上のズーム(CSS transform)であり、マウス座標系には影響しない。
+(function(){
+  const stage = document.querySelector(".stage");
+  let zs = 1, ztx = 0, zty = 0, pinch = null;
+  function apply(){
+    const layer = document.getElementById("zoomLayer");
+    layer.style.transform = (zs > 1.01) ? `translate(${ztx}px, ${zty}px) scale(${zs})` : "";
+    $("zoomReset").classList.toggle("on", zs > 1.01); // ズーム中のみリセットを表示
+  }
+  $("zoomReset").onclick = () => { zs = 1; ztx = 0; zty = 0; apply(); };
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const mid  = (t) => ({ x: (t[0].clientX + t[1].clientX)/2, y: (t[0].clientY + t[1].clientY)/2 });
+  stage.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      pinch = { d0: dist(e.touches), s0: zs, m0: mid(e.touches), tx0: ztx, ty0: zty };
+      // ピンチ開始でポインタ追跡を打ち切る(ズーム操作がポインタ移動・クリック・
+      // ドラッグ発火として誤解釈されるのを防ぐ)。
+      tpActive = false;
+      clearTimeout(lpTimer);
+      clearTimeout(dragArmTimer);
+    }
+  }, { passive: false });
+  stage.addEventListener("touchmove", (e) => {
+    if (pinch && e.touches.length === 2) {
+      e.preventDefault();
+      zs = Math.min(4, Math.max(1, pinch.s0 * dist(e.touches) / pinch.d0));
+      const m = mid(e.touches);
+      if (zs > 1.01) { ztx = pinch.tx0 + (m.x - pinch.m0.x); zty = pinch.ty0 + (m.y - pinch.m0.y); }
+      else { ztx = 0; zty = 0; }
+      apply();
+    }
+  }, { passive: false });
+  stage.addEventListener("touchend", (e) => { if (e.touches.length < 2) pinch = null; }, { passive: false });
+})();
+
+updateMouseUI(); // 初期表示
+updateRoomState();
+if (roomId) connect(); else log("「📶 接続」タブの「ルームID入力」からルームIDを設定してください");
+</script>
+</body>
+</html>
