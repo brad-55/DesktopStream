@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Desktop Stream — 視聴</title>
+<style>
+  /* 再配信の視聴専用クライアント。
+     URLの ?room=<ベース32文字><部屋数+1の3桁> から部屋数を割り出し、
+     001から順に空き部屋を探して入室する。 */
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1116; color: #e6e8ea;
+    font-family: "SF Mono", "Cascadia Code", Consolas, "Noto Sans Mono CJK JP", monospace;
+    height: 100vh; height: 100dvh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; flex: none;
+    padding: 8px 14px;
+    padding-left: calc(14px + env(safe-area-inset-left));
+    padding-right: calc(14px + env(safe-area-inset-right));
+    padding-top: calc(8px + env(safe-area-inset-top));
+    border-bottom: 1px solid #1e242b; background: #11151a;
+  }
+  header h1 { font-size: 13px; font-weight: 700; letter-spacing: .08em; color: #cfd6dd; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: #555; flex: none; }
+  #dot.ok { background: #2ecf8e; } #dot.warn { background: #e8b93c; } #dot.err { background: #e05252; }
+  #status { font-size: 12px; color: #9aa4b0; margin-left: auto; text-align: right; }
+
+  #app {
+    flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px;
+    padding: 10px;
+    padding-left: calc(10px + env(safe-area-inset-left));
+    padding-right: calc(10px + env(safe-area-inset-right));
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+  .stage {
+    position: relative; flex: none; width: 100%; aspect-ratio: 16/9;
+    background: #000; border-radius: 8px; overflow: hidden;
+  }
+  video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+  #unmute {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    padding: 12px 18px; font: inherit; font-size: 14px; color: #e6e8ea;
+    background: rgba(13,17,22,.8); border: 1px solid #3a4450; border-radius: 8px;
+    cursor: pointer; touch-action: manipulation; display: none;
+  }
+  #unmute.on { display: block; }
+  #retry {
+    position: absolute; left: 50%; top: 62%; transform: translate(-50%,-50%);
+    padding: 10px 16px; font: inherit; font-size: 13px; color: #e6e8ea;
+    background: rgba(28,58,46,.9); border: 1px solid #2f5a46; border-radius: 8px;
+    cursor: pointer; touch-action: manipulation; display: none;
+  }
+  #retry.on { display: block; }
+  #ovMsg {
+    position: absolute; left: 0; right: 0; top: 38%; text-align: center;
+    color: #8a93a0; font-size: 13px; padding: 0 16px; pointer-events: none;
+  }
+
+  /* コメント欄 */
+  #cmWrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+  #comments {
+    flex: 1; min-height: 0; overflow: auto; padding: 8px 10px;
+    background: #0a0d10; border: 1px solid #1e242b; border-radius: 8px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .cm { font-size: 13px; line-height: 1.5; word-break: break-word; }
+  .cm .meta { color: #7f8b98; margin-right: 6px; font-size: 11px; }
+  #cmForm { display: flex; gap: 6px; flex: none; }
+  #cmName {
+    width: 90px; flex: none; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
+    padding: 8px; border-radius: 8px; font: inherit; font-size: 16px;
+  }
+  #cmText {
+    flex: 1; min-width: 0; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
+    padding: 8px; border-radius: 8px; font: inherit; font-size: 16px;
+  }
+  #cmSend {
+    flex: none; padding: 8px 14px; min-height: 44px; font: inherit; font-size: 13px;
+    background: #1c3a2e; color: #dff3e8; border: 1px solid #2f5a46; border-radius: 8px;
+    cursor: pointer; touch-action: manipulation;
+  }
+  #cmSend:disabled, #cmText:disabled { opacity: .45; }
+  #cmSend:active:not(:disabled) { background: #234a3a; }
+
+  /* 横画面: プレーヤー左、コメント右 */
+  @media (orientation: landscape) and (min-width: 600px) {
+    #app { flex-direction: row; }
+    .stage { flex: 0 1 auto; width: auto; height: 100%; max-height: 100%; max-width: 62%; }
+    #cmWrap { flex: 1 1 300px; min-width: 260px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <span id="dot"></span>
+  <h1>DESKTOP STREAM 視聴</h1>
+  <span id="status" role="status" aria-live="polite">準備中…</span>
+</header>
+
+<div id="app">
+  <div class="stage">
+    <video id="player" autoplay playsinline muted></video>
+    <div id="ovMsg">配信を探しています…</div>
+    <button id="unmute">🔇 タップして音声ON</button>
+    <button id="retry">↻ もう一度さがす</button>
+  </div>
+  <div id="cmWrap">
+    <div id="comments" aria-label="コメント一覧"></div>
+    <div id="cmForm">
+      <input id="cmName" type="text" placeholder="名前" maxlength="20" />
+      <input id="cmText" type="text" placeholder="コメントを入力" maxlength="200" disabled />
+      <button id="cmSend" disabled>送信</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const AYAME_URL = "wss://ayame-labo.shiguredo.app/signaling";
+const $ = (id) => document.getElementById(id);
+const video = $("player");
+
+// ---- URLクエリから ベースID と 部屋数 を割り出す ----
+// room = <ベース(32文字)> + <部屋数+1 の3桁>。例: 末尾011 → 部屋数10(001〜010を探す)
+const roomParam = (new URLSearchParams(location.search).get("room") || "").trim();
+let base = "", roomCount = 0;
+if (roomParam.length > 3 && /^\d{3}$/.test(roomParam.slice(-3))) {
+  base = roomParam.slice(0, -3);
+  roomCount = parseInt(roomParam.slice(-3), 10) - 1;
+}
+
+let ws = null, pc = null, dc = null;
+let joinedRoom = "";
+let ended = false;
+
+function pad3(n){ return String(n).padStart(3, "0"); }
+function setStatus(text, cls){
+  $("status").textContent = text;
+  $("dot").className = cls || "";
+}
+function setOverlay(text){
+  $("ovMsg").textContent = text || "";
+  $("ovMsg").style.display = text ? "" : "none";
+}
+function enableComment(on){
+  $("cmText").disabled = !on;
+  $("cmSend").disabled = !on;
+}
+
+// ---- 入室スキャン: 001から順に試す ----
+async function scan(){
+  if (!base || roomCount < 1){
+    setStatus("URLが不正です", "err");
+    setOverlay("視聴用URLが正しくありません(roomパラメータを確認してください)");
+    return;
+  }
+  ended = false;
+  $("retry").classList.remove("on");
+  let sawEmpty = false, sawFull = false;
+  for (let i = 1; i <= roomCount; i++){
+    setStatus(`さがしています… ${i}/${roomCount}`, "warn");
+    setOverlay(`配信を探しています… (${i}/${roomCount})`);
+    const res = await tryRoom(base + pad3(i));
+    if (res === "joined"){ joinedRoom = base + pad3(i); return; }
+    if (res === "empty") sawEmpty = true;
+    if (res === "full") sawFull = true;
+    // full=満員 / empty=配信側不在 → いずれも次の部屋を試す
+  }
+  if (sawFull && !sawEmpty){
+    setStatus("満員です", "err");
+    setOverlay("満員のため入室できませんでした。しばらくしてからお試しください。");
+  } else {
+    setStatus("配信が見つかりません", "err");
+    setOverlay("配信が見つかりませんでした。配信中か、URLが正しいか確認してください。");
+  }
+  $("retry").classList.add("on");
+}
+
+// 1部屋を試す。joined: この部屋で接続開始(wsを引き継ぐ) / full / empty / error
+function tryRoom(room){
+  return new Promise((resolve) => {
+    let done = false;
+    const w = new WebSocket(AYAME_URL);
+    const finish = (r, keepWs) => {
+      if (done) return;
+      done = true;
+      clearTimeout(tm);
+      if (!keepWs){ try { w.close(); } catch(e){} }
+      resolve(r);
+    };
+    const tm = setTimeout(() => finish("error"), 5000);
+    w.onopen = () => w.send(JSON.stringify({ type: "register", roomId: room, clientId: "dss-view-" + Date.now() }));
+    w.onerror = () => finish("error");
+    w.onclose = () => finish("error");
+    w.onmessage = async (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
+      if (m.type === "ping"){ w.send(JSON.stringify({ type: "pong" })); return; }
+      if (m.type === "reject"){ finish("full"); return; }
+      if (m.type === "accept"){
+        if (!m.isExistClient){ finish("empty"); return; } // 配信側がこの部屋に居ない
+        // 配信側が居る: この接続を本接続に昇格し、こちらからofferする
+        ws = w;
+        w.onclose = () => onEnded("配信が終了しました");
+        w.onerror = () => {};
+        w.onmessage = onWsMessage;
+        try { await startPeer(); finish("joined", true); }
+        catch(e){ finish("error"); }
+      }
+    };
+  });
+}
+
+async function onWsMessage(ev){
+  let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
+  try {
+    if (m.type === "ping"){ ws.send(JSON.stringify({ type: "pong" })); return; }
+    if (m.type === "answer"){ if (pc) await pc.setRemoteDescription({ type: "answer", sdp: m.sdp }); return; }
+    if (m.type === "offer"){
+      // 配信側からの再オファー(念のため対応)
+      if (pc) { await pc.setRemoteDescription({ type: "offer", sdp: m.sdp });
+        const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
+        ws.send(JSON.stringify({ type: "answer", sdp: ans.sdp })); }
+      return;
+    }
+    if (m.type === "candidate" && m.ice){ if (pc){ try { await pc.addIceCandidate(m.ice); } catch(e){} } return; }
+    if (m.type === "bye"){ onEnded("配信が終了しました"); return; }
+  } catch(e){}
+}
+
+async function startPeer(){
+  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  pc.onicecandidate = (e) => { if (e.candidate && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "candidate", ice: e.candidate })); };
+  pc.ontrack = (e) => {
+    if (e.streams && e.streams[0] && video.srcObject !== e.streams[0]) video.srcObject = e.streams[0];
+    setOverlay("");
+    $("unmute").classList.add("on");
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === "connected"){ setStatus("視聴中", "ok"); }
+    if (pc.connectionState === "failed" || pc.connectionState === "closed") onEnded("接続が切れました");
+  };
+  pc.addTransceiver("video", { direction: "recvonly" });
+  pc.addTransceiver("audio", { direction: "recvonly" });
+  dc = pc.createDataChannel("comment");
+  dc.onopen = () => enableComment(true);
+  dc.onclose = () => enableComment(false);
+  dc.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
+    if (m.type === "comment") addComment(m.name, m.text, m.ts);
+  };
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({ type: "offer", sdp: offer.sdp }));
+}
+
+function onEnded(msg){
+  if (ended) return;
+  ended = true;
+  enableComment(false);
+  setStatus("切断", "err");
+  setOverlay(msg);
+  $("retry").classList.add("on");
+  try { pc && pc.close(); } catch(e){}
+  try { ws && ws.close(); } catch(e){}
+  pc = null; ws = null; dc = null;
+  video.srcObject = null;
+  $("unmute").classList.remove("on");
+}
+
+// ---- コメント ----
+$("cmName").value = localStorage.getItem("dss_view_name") || "";
+function addComment(name, text, ts){
+  name = String(name || "名無し").slice(0, 20);
+  text = String(text || "").slice(0, 200);
+  if (!text.trim()) return;
+  const box = $("comments");
+  const div = document.createElement("div");
+  div.className = "cm";
+  const meta = document.createElement("span");
+  meta.className = "meta";
+  meta.textContent = new Date(ts || Date.now()).toLocaleTimeString() + " " + name;
+  const body = document.createElement("span");
+  body.textContent = text; // textContentで挿入(HTMLとして解釈させない)
+  div.appendChild(meta); div.appendChild(body);
+  box.appendChild(div);
+  while (box.childElementCount > 200) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+function sendComment(){
+  const text = $("cmText").value.trim();
+  if (!text || !dc || dc.readyState !== "open") return;
+  const name = $("cmName").value.trim().slice(0, 20) || "名無し";
+  localStorage.setItem("dss_view_name", name);
+  // 自分のコメントも配信側から全員へ中継されて戻ってくるので、ここでは表示しない
+  dc.send(JSON.stringify({ type: "comment", name, text }));
+  $("cmText").value = "";
+}
+$("cmSend").onclick = sendComment;
+$("cmText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) sendComment(); });
+
+// ---- 音声ON(自動再生制限のためミュートで開始) ----
+$("unmute").onclick = () => {
+  video.muted = !video.muted;
+  if (!video.muted) video.play().catch(() => {});
+  $("unmute").textContent = video.muted ? "🔇 タップして音声ON" : "🔊 音声OFFにする";
+};
+$("retry").onclick = () => { $("retry").classList.remove("on"); scan(); };
+
+scan();
+</script>
+</body>
+</html>
