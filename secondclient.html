@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Desktop Stream — 視聴</title>
 <style>
   /* 再配信の視聴専用クライアント。
@@ -42,13 +42,12 @@
   }
   video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
   #unmute {
-    margin-left: 8px; flex: none;
-    padding: 6px 10px; min-height: 34px; font: inherit; font-size: 12px; color: #e6e8ea;
-    background: #161b21; border: 1px solid #2a323b; border-radius: 6px;
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    padding: 12px 18px; font: inherit; font-size: 14px; color: #e6e8ea;
+    background: rgba(13,17,22,.8); border: 1px solid #3a4450; border-radius: 8px;
     cursor: pointer; touch-action: manipulation; display: none;
   }
-  #unmute.on { display: inline-block; }
-  #unmute:active { background: #232c36; }
+  #unmute.on { display: block; }
   #retry {
     position: absolute; left: 50%; top: 62%; transform: translate(-50%,-50%);
     padding: 10px 16px; font: inherit; font-size: 13px; color: #e6e8ea;
@@ -71,10 +70,6 @@
   .cm { font-size: 13px; line-height: 1.5; word-break: break-word; }
   .cm .meta { color: #7f8b98; margin-right: 6px; font-size: 11px; }
   #cmForm { display: flex; gap: 6px; flex: none; }
-  #cmColor {
-    width: 44px; height: 44px; flex: none; padding: 2px;
-    background: #0d1116; border: 1px solid #2a323b; border-radius: 8px; cursor: pointer;
-  }
   #cmName {
     width: 90px; flex: none; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
     padding: 8px; border-radius: 8px; font: inherit; font-size: 16px;
@@ -91,13 +86,6 @@
   #cmSend:disabled, #cmText:disabled { opacity: .45; }
   #cmSend:active:not(:disabled) { background: #234a3a; }
 
-  /* 縦画面: プレーヤー高さを画面の42%までに抑える。
-     キーボード表示時は interactive-widget=resizes-content により dvh が縮むため、
-     プレーヤーが自動で小さくなり、入力欄とともに画面内に収まる */
-  @media (orientation: portrait), (max-width: 599px) {
-    .stage { max-height: 42dvh; }
-    #comments { min-height: 60px; }
-  }
   /* 横画面: プレーヤー左、コメント右 */
   @media (orientation: landscape) and (min-width: 600px) {
     #app { flex-direction: row; }
@@ -112,19 +100,18 @@
   <span id="dot"></span>
   <h1>DESKTOP STREAM 視聴</h1>
   <span id="status" role="status" aria-live="polite">準備中…</span>
-  <button id="unmute">🔇 音声ON</button>
 </header>
 
 <div id="app">
   <div class="stage">
     <video id="player" autoplay playsinline muted></video>
     <div id="ovMsg">配信を探しています…</div>
+    <button id="unmute">🔇 タップして音声ON</button>
     <button id="retry">↻ もう一度さがす</button>
   </div>
   <div id="cmWrap">
     <div id="comments" aria-label="コメント一覧"></div>
     <div id="cmForm">
-      <input id="cmColor" type="color" title="コメントの色" aria-label="コメントの色" />
       <input id="cmName" type="text" placeholder="名前" maxlength="20" />
       <input id="cmText" type="text" placeholder="コメントを入力" maxlength="200" disabled />
       <button id="cmSend" disabled>送信</button>
@@ -236,28 +223,13 @@ async function onWsMessage(ev){
     if (m.type === "offer"){
       // 配信側からの再オファー(念のため対応)
       if (pc) { await pc.setRemoteDescription({ type: "offer", sdp: m.sdp });
-        const ans = await pc.createAnswer();
-        const asdp = tuneOpus(ans.sdp);
-        await pc.setLocalDescription({ type: "answer", sdp: asdp });
-        ws.send(JSON.stringify({ type: "answer", sdp: asdp })); }
+        const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
+        ws.send(JSON.stringify({ type: "answer", sdp: ans.sdp })); }
       return;
     }
     if (m.type === "candidate" && m.ice){ if (pc){ try { await pc.addIceCandidate(m.ice); } catch(e){} } return; }
     if (m.type === "bye"){ onEnded("配信が終了しました"); return; }
   } catch(e){}
-}
-
-// 受信するOpus音声の要求条件をSDPに追記する。
-// fmtpは「受信側が何をどう送ってほしいか」の宣言なので、視聴側のSDPを
-// 書き換えることで配信側エンコーダの動作(モノラル化・約32kbps・無音間引き)を避ける。
-function tuneOpus(sdp){
-  const m = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/);
-  if (!m) return sdp;
-  const pt = m[1];
-  const extra = "stereo=1;sprop-stereo=1;maxaveragebitrate=256000;usedtx=0";
-  const re = new RegExp("a=fmtp:" + pt + " ([^\\r\\n]*)");
-  if (re.test(sdp)) return sdp.replace(re, (mm, p) => "a=fmtp:" + pt + " " + p + ";" + extra);
-  return sdp.replace(m[0], m[0] + "\r\na=fmtp:" + pt + " " + extra);
 }
 
 async function startPeer(){
@@ -279,12 +251,11 @@ async function startPeer(){
   dc.onclose = () => enableComment(false);
   dc.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
-    if (m.type === "comment") addComment(m.name, m.text, m.ts, m.color);
+    if (m.type === "comment") addComment(m.name, m.text, m.ts);
   };
   const offer = await pc.createOffer();
-  const sdp = tuneOpus(offer.sdp);
-  await pc.setLocalDescription({ type: "offer", sdp });
-  ws.send(JSON.stringify({ type: "offer", sdp }));
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({ type: "offer", sdp: offer.sdp }));
 }
 
 function onEnded(msg){
@@ -303,18 +274,7 @@ function onEnded(msg){
 
 // ---- コメント ----
 $("cmName").value = localStorage.getItem("dss_view_name") || "";
-// コメント色: 保存が無ければパレットからクライアントが自動選択する
-const CM_PALETTE = ["#7fd1ff", "#ffd479", "#a5f3b4", "#ff9db0", "#d3b4ff", "#ffb47f", "#8ce8dc", "#f0ef8a"];
-(function(){
-  let c = localStorage.getItem("dss_view_color");
-  if (!/^#[0-9a-fA-F]{6}$/.test(c || "")){
-    c = CM_PALETTE[Math.floor(Math.random() * CM_PALETTE.length)];
-    localStorage.setItem("dss_view_color", c);
-  }
-  $("cmColor").value = c;
-})();
-$("cmColor").addEventListener("change", () => localStorage.setItem("dss_view_color", $("cmColor").value));
-function addComment(name, text, ts, color){
+function addComment(name, text, ts){
   name = String(name || "名無し").slice(0, 20);
   text = String(text || "").slice(0, 200);
   if (!text.trim()) return;
@@ -326,11 +286,10 @@ function addComment(name, text, ts, color){
   meta.textContent = new Date(ts || Date.now()).toLocaleTimeString() + " " + name;
   const body = document.createElement("span");
   body.textContent = text; // textContentで挿入(HTMLとして解釈させない)
-  if (/^#[0-9a-fA-F]{6}$/.test(color || "")){ meta.style.color = color; body.style.color = color; }
   div.appendChild(meta); div.appendChild(body);
-  box.insertBefore(div, box.firstChild); // 最新コメントを上に表示
-  while (box.childElementCount > 200) box.removeChild(box.lastChild);
-  box.scrollTop = 0;
+  box.appendChild(div);
+  while (box.childElementCount > 200) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
 }
 function sendComment(){
   const text = $("cmText").value.trim();
@@ -338,7 +297,7 @@ function sendComment(){
   const name = $("cmName").value.trim().slice(0, 20) || "名無し";
   localStorage.setItem("dss_view_name", name);
   // 自分のコメントも配信側から全員へ中継されて戻ってくるので、ここでは表示しない
-  dc.send(JSON.stringify({ type: "comment", name, text, color: $("cmColor").value }));
+  dc.send(JSON.stringify({ type: "comment", name, text }));
   $("cmText").value = "";
 }
 $("cmSend").onclick = sendComment;
@@ -348,7 +307,7 @@ $("cmText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isC
 $("unmute").onclick = () => {
   video.muted = !video.muted;
   if (!video.muted) video.play().catch(() => {});
-  $("unmute").textContent = video.muted ? "🔇 音声ON" : "🔊 音声OFF";
+  $("unmute").textContent = video.muted ? "🔇 タップして音声ON" : "🔊 音声OFFにする";
 };
 $("retry").onclick = () => { $("retry").classList.remove("on"); scan(); };
 
