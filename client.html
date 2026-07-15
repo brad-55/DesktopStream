@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
 <title>Desktop Stream — Test Client</title>
 <style>
   :root { color-scheme: dark; }
@@ -60,9 +60,13 @@
     .stage { flex: 0 1 auto; height: 100%; max-height: 100%; width: auto; max-width: 58%; }
     #rightcol { flex: 1 1 320px; min-width: 280px; }
   }
-  /* 縦持ち・狭い画面: タブバーを下部に配置して親指で届きやすく */
+  /* 縦持ち・狭い画面: タブバーを下部に配置して親指で届きやすく。
+     プレーヤー高さは画面の42%までに抑える。キーボード表示時は
+     interactive-widget=resizes-content により dvh が縮むため、
+     プレーヤーが自動で小さくなり、文字入力欄とともに画面内に収まる */
   @media (orientation: portrait), (max-width: 599px) {
     #tabbar { order: 9; }
+    .stage { max-height: 42dvh; }
   }
   .stage {
     position: relative; background: #000; border: 1px solid #1e242b;
@@ -175,9 +179,9 @@
     color: #e6e8ea; padding: 8px; border-radius: 6px; font: inherit; font-size: 16px; }
   .keys button { padding: 6px 8px; font-size: 12px; }
   /* 全画面時: .stage(映像+ポインタ)を画面いっぱいに、映像はcontainで黒帯 */
-  .stage:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; border: none; border-radius: 0; }
+  .stage:fullscreen { width: 100vw; height: 100dvh; aspect-ratio: auto; border: none; border-radius: 0; }
   .stage:fullscreen video { width: 100%; height: 100%; object-fit: contain; }
-  .stage:-webkit-full-screen { width: 100vw; height: 100vh; border: none; }
+  .stage:-webkit-full-screen { width: 100vw; height: 100dvh; border: none; }
   .stage:-webkit-full-screen video { width: 100%; height: 100%; object-fit: contain; }
   /* ルームID入力モーダル */
   #roomModal {
@@ -198,6 +202,68 @@
   #qrVideoWrap { display: none; }
   #qrVideoWrap.on { display: block; }
   #qrVideo { width: 100%; border-radius: 8px; background: #000; }
+  /* フローティングスクロールホイール: 右端中央。つまみをドラッグして上下スクロール */
+  #fwheel {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 30px; height: 140px; border-radius: 15px; z-index: 6;
+    background: rgba(13,17,22,.5); border: 1px solid rgba(58,68,80,.7);
+    touch-action: none;
+  }
+  #fwThumb {
+    position: absolute; left: 3px; right: 3px; top: 50%; height: 34px;
+    margin-top: -17px; border-radius: 12px; pointer-events: none;
+    background: rgba(127,209,255,.5); border: 1px solid rgba(127,209,255,.8);
+  }
+  /* リモートカーソル形状: 状態色のリングは維持し、中央の形だけ変える */
+  #vptr::after {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    font-size: 13px; line-height: 1; color: #fff;
+    text-shadow: 0 0 3px rgba(0,0,0,.9); pointer-events: none;
+  }
+  #vptr[data-kind="ibeam"]::after { content: "I"; font-weight: 700; }
+  #vptr[data-kind="hand"]::after { content: "☝"; font-size: 11px; }
+  #vptr[data-kind="wait"]::after { content: "⏳"; font-size: 10px; }
+  #vptr[data-kind="cross"]::after { content: "+"; font-weight: 700; }
+  #vptr[data-kind="ns"]::after { content: "↕"; }
+  #vptr[data-kind="we"]::after { content: "↔"; }
+  #vptr[data-kind="nwse"]::after { content: "⤡"; }
+  #vptr[data-kind="nesw"]::after { content: "⤢"; }
+  #vptr[data-kind="all"]::after { content: "✥"; }
+  #vptr[data-kind="no"]::after { content: "🚫"; font-size: 10px; }
+  /* 矢印: 三角形の先端が円の中心に一致するよう、中心から右下へ描く */
+  #vptr[data-kind="arrow"]::after {
+    content: ""; left: 50%; top: 50%; transform: rotate(20deg); transform-origin: top left;
+    width: 0; height: 0;
+    border-left: 6px solid #fff; border-bottom: 9px solid transparent;
+    border-top: 0; border-right: 0;
+    filter: drop-shadow(0 0 2px rgba(0,0,0,.85));
+  }
+  /* ショートカットのプルダウン */
+  .keys select { flex: 1 1 160px; width: auto; min-width: 0; max-width: none; }
+  /* 録画中の表示 */
+  .rec-on { border-color: #e05252 !important; color: #ffb4b4 !important; }
+  /* 再配信の視聴者一覧 */
+  .rs-viewer {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 4px 4px 4px 10px; background: #0f1419; border: 1px solid #1e242b;
+    border-radius: 6px; margin-bottom: 6px; font-size: 12px;
+  }
+  .rs-viewer button { min-height: 30px; padding: 4px 10px; font-size: 11px; }
+  /* WoLのMAC入力 */
+  #wolMac {
+    flex: 1; min-width: 150px; background: #0d1116; border: 1px solid #2a323b;
+    color: #e6e8ea; padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px;
+  }
+  /* 全画面中の文字入力: #kbdをstage内へ移動して使う。
+     入力欄の高さ(+キーボード持ち上げ分)は --kbdH で映像領域(zoomLayer)から差し引く */
+  .stage.kbd-fs #zoomLayer { bottom: var(--kbdH, 64px); }
+  .stage.kbd-fs #kbd {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 7;
+    background: rgba(13,17,22,.94); border-top: 1px solid #2a323b;
+    padding: 6px 8px; padding-bottom: calc(6px + env(safe-area-inset-bottom));
+    display: block;
+  }
+  .stage.kbd-fs #kbd .keys { display: none; } /* 1行に抑えるため特殊キー列は隠す */
   /* 映像上のオーバーレイ操作: 全画面中のみ表示(通常時はタブ内のボタンを使う) */
   .stage-ov { position: absolute; top: 8px; right: 8px; z-index: 6; display: none; gap: 6px; }
   .stage:fullscreen .stage-ov { display: flex; }
@@ -243,10 +309,12 @@
     </div>
     <div class="hint" id="hint">Start で配信開始</div>
     <div class="stage-ov">
+      <button id="ovKbd" aria-label="文字入力の表示切り替え">⌨</button>
       <button id="ovMute">🔇 音声ON</button>
       <button id="ovFs" aria-label="全画面切り替え">⛶</button>
     </div>
     <button id="zoomReset">1×に戻す</button>
+    <div id="fwheel" title="ドラッグでスクロール"><div id="fwThumb"></div></div>
   </div>
 
   <div id="rightcol">
@@ -277,6 +345,16 @@
           <option value="kbd">⌨ 文字入力</option>
         </select></span>
       </div>
+      <div class="controls">
+        <button id="shotBtn">スクショ</button>
+        <button id="recBtn">録画</button>
+        <button id="clipToPc">📋→PC</button>
+        <button id="clipFromPc" disabled>PC→📋</button>
+        <button id="volDown">音量−</button>
+        <button id="volUp">音量＋</button>
+        <button id="volMute">消音</button>
+        <button id="monOff">画面OFF</button>
+      </div>
 
       <!-- 文字入力 -->
       <div id="kbd">
@@ -286,19 +364,32 @@
           <span class="toggle"><input id="kbdEnter" type="checkbox" /><label for="kbdEnter">+Enter</label></span>
         </div>
         <div class="kbdrow keys">
-          <button data-key="enter">Enter</button>
-          <button data-key="tab">Tab</button>
-          <button data-key="esc">Esc</button>
-          <button data-key="backspace">BS</button>
-          <button data-key="up">↑</button>
-          <button data-key="down">↓</button>
-          <button data-key="left">←</button>
-          <button data-key="right">→</button>
-          <button data-key="ctrl+c">Ctrl+C</button>
-          <button data-key="ctrl+v">Ctrl+V</button>
-          <button data-key="alt+tab">Alt+Tab</button>
-          <button data-key="win">Win</button>
-          <button data-key="shift+rclick">Shift+右click</button>
+          <select id="scSel" aria-label="ショートカット選択">
+            <option value="enter">Enter</option>
+            <option value="tab">Tab</option>
+            <option value="esc">Esc</option>
+            <option value="backspace">BackSpace</option>
+            <option value="delete">Delete</option>
+            <option value="up">↑</option>
+            <option value="down">↓</option>
+            <option value="left">←</option>
+            <option value="right">→</option>
+            <option value="ctrl+a">Ctrl+A</option>
+            <option value="ctrl+c">Ctrl+C</option>
+            <option value="ctrl+v">Ctrl+V</option>
+            <option value="ctrl+x">Ctrl+X</option>
+            <option value="ctrl+z">Ctrl+Z</option>
+            <option value="ctrl+y">Ctrl+Y</option>
+            <option value="alt+tab">Alt+Tab</option>
+            <option value="win">Win</option>
+            <option value="win+d">Win+D</option>
+            <option value="f5">F5</option>
+            <option value="alt+f4">Alt+F4</option>
+            <option value="ctrl+shift+esc">Ctrl+Shift+Esc</option>
+            <option value="shift+rclick">Shift+右クリック</option>
+            <option value="__custom">＋カスタム追加…</option>
+          </select>
+          <button id="scSend" class="primary">キー送信</button>
         </div>
       </div>
 
@@ -329,6 +420,7 @@
       <div class="controls">
         <span class="hintline">視聴者: <span id="rsCount">0</span> / <span id="rsCap">0</span> 人</span>
       </div>
+      <div id="rsViewers"></div>
       <div class="fld">
         <label for="rsUrl">視聴用URL(再配信中に有効)</label>
         <div class="controls">
@@ -349,6 +441,20 @@
     </div>
 
     <div class="tabpage" id="tab-settings">
+      <div class="setting-card">
+        <span class="sc-label">ファイルをPCへ送る</span>
+        <span class="sc-desc">選んだファイルをPC側の received フォルダに保存します</span>
+        <div class="sc-row"><input id="fileSend" type="file" /></div>
+        <div class="sc-row"><span class="hintline" id="fileProg"></span></div>
+      </div>
+      <div class="setting-card">
+        <span class="sc-label">他の端末を起こす (Wake on LAN)</span>
+        <span class="sc-desc">PCと同じネットワークにある端末へ起動パケットを送ります</span>
+        <div class="sc-row">
+          <input id="wolMac" type="text" placeholder="MACアドレス (例 00:11:22:33:44:55)" />
+          <button id="wolSend">送信</button>
+        </div>
+      </div>
       <div class="settings-list">
         <div class="setting-card">
           <span class="sc-label">画質・コーデック</span>
@@ -624,6 +730,10 @@ function wireControl(ch) {
         return;
       }
       if (m.type === "cpu") { serverCPU = m.server; }
+      if (m.type === "clip" && typeof m.text === "string") { rxClip = m.text; $("clipFromPc").disabled = false; log("PCでコピーを検出(「PC→📋」で取得できます)"); }
+      if (m.type === "cursor" && m.kind) setCursorKind(m.kind);
+      if (m.type === "secure") rsOnSecure(!!m.on);
+      if (m.type === "file-ok") log("ファイルをPCに保存しました: " + (m.fname || ""));
       if (m.type === "encoders" && Array.isArray(m.list)) {
         const sel = $("codecSel");
         const prev = currentCodec;
@@ -673,9 +783,28 @@ $("kbdSend").onclick = sendText;
 $("kbdText").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); sendText(); }
 });
-document.querySelectorAll("#kbd .keys button").forEach(b => {
-  b.addEventListener("click", () => sendControl({ type: "key", key: b.dataset.key }));
-});
+// ショートカットのプルダウン送信。カスタム組み合わせはlocalStorageに保存して追加できる。
+(function(){
+  const sel = $("scSel");
+  const saved = JSON.parse(localStorage.getItem("dss_custom_keys") || "[]");
+  const addOpt = (k) => {
+    const o = document.createElement("option");
+    o.value = k; o.textContent = k;
+    sel.insertBefore(o, sel.querySelector('option[value="__custom"]'));
+  };
+  saved.forEach(addOpt);
+  sel.addEventListener("change", () => {
+    if (sel.value !== "__custom") return;
+    const k = (prompt("送信するキーの組み合わせを入力 (例: ctrl+shift+n)") || "").trim().toLowerCase();
+    if (k && /^[a-z0-9+]+$/.test(k)){
+      if (!saved.includes(k)){ saved.push(k); localStorage.setItem("dss_custom_keys", JSON.stringify(saved)); addOpt(k); }
+      sel.value = k;
+    } else {
+      sel.value = "enter";
+    }
+  });
+  $("scSend").onclick = () => { if (sel.value && sel.value !== "__custom") sendControl({ type: "key", key: sel.value }); };
+})();
 
 // タブ切り替え(操作/設定)。選択はlocalStorageに保存。
 function switchTab(name){
@@ -898,15 +1027,19 @@ function isFs(){ return document.fullscreenElement === stage || document.webkitF
 // 非全画面: 映像はstage全面(fill)。全画面: contain によるレターボックスを計算。
 function videoRect(){
   // 実際に映像が描画されている矩形(object-fit: contain のレターボックスを補正)。
-  // 以前は全画面時のみ補正していたが、通常表示でもstageのアスペクト比が映像と
-  // 一致しない場合がある(横向きレイアウトの幅制約や、16:9でないリモート画面)。
-  // その場合に上下の隙間分だけポインタ座標がズレるため、常にcontain計算を行う。
-  const r = stage.getBoundingClientRect();
+  // 基準は zoomLayer のレイアウト寸法(offsetWidth/Height)。
+  //  - ピンチズームのtransformの影響を受けない(レイアウト寸法のため)
+  //  - 全画面文字入力で下部に入力欄が入り、映像領域がstageより
+  //    小さくなるケースも正しく反映される
+  const layer = document.getElementById("zoomLayer");
+  const sr = stage.getBoundingClientRect();
+  const lw = layer.offsetWidth  || sr.width;
+  const lh = layer.offsetHeight || sr.height;
   const vw = video.videoWidth || 16, vh = video.videoHeight || 9;
-  const ar = vw/vh, sar = r.width/r.height;
+  const ar = vw/vh, sar = lw/lh;
   let w, h;
-  if (sar > ar){ h = r.height; w = h*ar; } else { w = r.width; h = w/ar; }
-  return { ox:(r.width-w)/2, oy:(r.height-h)/2, w, h };
+  if (sar > ar){ h = lh; w = h*ar; } else { w = lw; h = w/ar; }
+  return { ox:(lw-w)/2, oy:(lh-h)/2, w, h };
 }
 function clampPtr(){
   const v = videoRect();
@@ -942,6 +1075,54 @@ function toggleFs(){
 $("fsBtn").onclick = toggleFs;
 $("ovFs").onclick = toggleFs;
 
+// ===== 全画面中の文字入力 =====
+// 全画面要素(.stage)の外にあるUIは全画面中に表示されないため、
+// 既存の文字入力エリア(#kbd)をstage内へ移動して使う(送信ロジックはそのまま生きる)。
+// 元の位置はコメントノードで記憶し、終了時に戻して入力エリアの表示状態も復元する。
+let kbdHome = null;
+function fsKbdOn(){
+  const kbd = $("kbd");
+  if (!kbdHome){ kbdHome = document.createComment("kbd-home"); kbd.parentNode.insertBefore(kbdHome, kbd); }
+  stage.appendChild(kbd);
+  kbd.style.display = ""; // トラックパッド選択中でも全画面中は表示する
+  stage.classList.add("kbd-fs");
+  fsKbdMeasure();
+  $("kbdText").focus();
+}
+function fsKbdOff(){
+  const kbd = $("kbd");
+  if (!stage.classList.contains("kbd-fs")) return;
+  stage.classList.remove("kbd-fs");
+  kbd.style.bottom = "";
+  stage.style.removeProperty("--kbdH");
+  if (kbdHome && kbd.parentNode === stage) kbdHome.parentNode.insertBefore(kbd, kbdHome);
+  applyInputMode(); // タブ内での表示状態(トラックパッド/文字入力)を復元
+  updateMouseUI();
+}
+// 入力欄の高さと、OSキーボードによる持ち上げ量を反映する。
+// interactive-widget=resizes-content が効く環境ではレイアウト自体が縮む(lift≒0)。
+// 効かない環境(visualViewportだけ縮む)では、縮み分だけ入力欄を持ち上げて
+// キーボードに隠れないようにし、その分も映像領域から差し引く。
+function fsKbdMeasure(){
+  if (!stage.classList.contains("kbd-fs")) return;
+  const kbd = $("kbd");
+  let lift = 0;
+  if (window.visualViewport){
+    lift = Math.max(0, window.innerHeight - Math.round(window.visualViewport.height + window.visualViewport.offsetTop));
+  }
+  kbd.style.bottom = lift + "px";
+  stage.style.setProperty("--kbdH", (kbd.offsetHeight + lift) + "px");
+  updateMouseUI(); // 映像領域が変わるためポインタ位置を再計算(座標ズレ防止)
+}
+$("ovKbd").onclick = () => {
+  if (stage.classList.contains("kbd-fs")) fsKbdOff(); else fsKbdOn();
+};
+window.addEventListener("resize", fsKbdMeasure);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", fsKbdMeasure);
+// 全画面を抜けたら入力エリアを元の場所へ戻す
+document.addEventListener("fullscreenchange", () => { if (!isFs()) fsKbdOff(); });
+document.addEventListener("webkitfullscreenchange", () => { if (!isFs()) fsKbdOff(); });
+
 function sendMouse(action, button){
   const v = videoRect();
   sendControl({ type:"mouse", action: action, button: button||"left", x: vpx/v.w, y: vpy/v.h });
@@ -956,6 +1137,7 @@ function sendClick(button){
 // 入力ハンドラを指定要素に取り付ける。activeFn が true のときだけ反応。
 function attachPointer(el, activeFn){
   el.addEventListener("pointerdown", (ev) => {
+    if (padTwoFinger) return; // パッド2本指スクロール中は通常のポインタ操作を止める
     if (!mouseEnabled() || !activeFn()) return;
     ev.preventDefault();
     tpActive = true; lpFired = false;
@@ -993,6 +1175,7 @@ function attachPointer(el, activeFn){
     }
   });
   el.addEventListener("pointermove", (ev) => {
+    if (padTwoFinger) return;
     if (!mouseEnabled() || !tpActive || !activeFn()) return;
     const dx = (ev.clientX - tpLast.x) * SENS;
     const dy = (ev.clientY - tpLast.y) * SENS;
@@ -1011,6 +1194,7 @@ function attachPointer(el, activeFn){
     }
   });
   el.addEventListener("pointerup", (ev) => {
+    if (padTwoFinger) return;
     if (!mouseEnabled() || !activeFn()) return;
     clearTimeout(lpTimer);
     clearTimeout(dragArmTimer);
@@ -1353,14 +1537,32 @@ function rsResetSlot(slot){
 }
 function rsUpdateCount(){
   let n = 0;
-  for (const s of rsSlots){ if (s && s.pc && s.pc.connectionState === "connected") n++; }
+  const list = [];
+  for (const s of rsSlots){
+    if (s && s.pc && s.pc.connectionState === "connected"){ n++; list.push(s); }
+  }
   $("rsCount").textContent = n;
+  // 視聴者一覧(ユーザー名 + 切断ボタン)
+  const box = $("rsViewers");
+  box.innerHTML = "";
+  for (const s of list){
+    const row = document.createElement("div");
+    row.className = "rs-viewer";
+    const nm = document.createElement("span");
+    nm.textContent = "#" + s.i + " " + (s.name || "(名前未受信)");
+    const btn = document.createElement("button");
+    btn.textContent = "切断";
+    btn.onclick = () => { rsLog(`視聴者を切断しました (room ${rsPad3(s.i)})`); rsResetSlot(s); };
+    row.appendChild(nm); row.appendChild(btn);
+    box.appendChild(row);
+  }
 }
 
 // ---- コメント: 受信したら一覧に表示し、全視聴者へ中継する ----
 function rsWireComment(slot, ch){
   ch.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
+    if (m.type === "hello"){ slot.name = String(m.name || "").slice(0, 20); rsUpdateCount(); return; }
     if (m.type !== "comment") return;
     const color = /^#[0-9a-fA-F]{6}$/.test(String(m.color || "")) ? m.color : "";
     const c = { name: String(m.name || "名無し").slice(0, 20), text: String(m.text || "").slice(0, 200), color, ts: Date.now() };
@@ -1381,9 +1583,9 @@ function rsAddComment(c, roomNo){
   body.textContent = c.text; // textContentで挿入しHTMLとして解釈させない
   if (c.color){ head.style.color = c.color; body.style.color = c.color; }
   div.appendChild(head); div.appendChild(body);
-  box.appendChild(div);
-  while (box.childElementCount > RS_MAX_COMMENTS) box.removeChild(box.firstChild);
-  box.scrollTop = box.scrollHeight;
+  box.insertBefore(div, box.firstChild); // 最新コメントを上に表示
+  while (box.childElementCount > RS_MAX_COMMENTS) box.removeChild(box.lastChild);
+  box.scrollTop = 0;
 }
 
 // ---- 開始/停止とUI ----
@@ -1436,6 +1638,7 @@ async function rsStart(){
   rsLog(`再配信を開始しました (${rooms}部屋, 映像${RS_MAX_VIDEO_BPS/1000}kbps固定, H.265優先)`);
 }
 function rsStopMedia(){
+  rsClearMask();
   rsStopSourceExtras();
   if (rsMicStream){ rsMicStream.getTracks().forEach(t => t.stop()); rsMicStream = null; rsMicTrack = null; }
   rsVideoTrack = null;
@@ -1487,6 +1690,209 @@ $("rsCopy").onclick = async () => {
   if (!u) return;
   try { await navigator.clipboard.writeText(u); rsLog("URLをコピーしました"); }
   catch(e){ $("rsUrl").select(); document.execCommand("copy"); rsLog("URLをコピーしました"); }
+};
+
+
+// ================= スクロール(ホイール) =================
+// 指の移動量(px)を蓄積し、30px=1ノッチに換算して間引き送信する。
+// 正=下方向の指移動=上スクロール(コンテンツが指に追従するナチュラル方向)。
+let wheelAcc = 0, wheelTimer = null;
+function queueWheel(px){
+  wheelAcc += px;
+  if (wheelTimer) return;
+  wheelTimer = setTimeout(() => {
+    wheelTimer = null;
+    const ticks = Math.trunc(wheelAcc / 30);
+    if (ticks !== 0){ wheelAcc -= ticks * 30; sendControl({ type: "wheel", dy: ticks }); }
+  }, 50);
+}
+
+// パッドの2本指スクロール。2本目が触れたら通常のポインタ操作を打ち切り、
+// 指を離しきるまでスクロール専用モードにする。
+let padPtrs = new Map(); // pointerId -> 前回のY
+let padTwoFinger = false;
+pad.addEventListener("pointerdown", (ev) => {
+  padPtrs.set(ev.pointerId, ev.clientY);
+  if (padPtrs.size === 2){
+    padTwoFinger = true;
+    tpActive = false;
+    clearTimeout(lpTimer); clearTimeout(dragArmTimer); clearTimeout(pendClickTimer);
+    pendingClick = false;
+  }
+});
+pad.addEventListener("pointermove", (ev) => {
+  if (!padTwoFinger || !padPtrs.has(ev.pointerId)) return;
+  const dy = ev.clientY - padPtrs.get(ev.pointerId);
+  padPtrs.set(ev.pointerId, ev.clientY);
+  queueWheel(dy / 2); // 2本分届くので片指相当に均す
+});
+function padPtrUp(ev){
+  padPtrs.delete(ev.pointerId);
+  if (padPtrs.size === 0) padTwoFinger = false;
+}
+pad.addEventListener("pointerup", padPtrUp);
+pad.addEventListener("pointercancel", padPtrUp);
+
+// フローティングホイール: つまみをドラッグした量をスクロールとして送る。
+// 離すとつまみは中央へ戻る(Splashtopのスクロールバー相当)。
+(function(){
+  const wheel = $("fwheel"), thumb = $("fwThumb");
+  let active = false, lastY = 0, off = 0;
+  wheel.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    active = true; lastY = ev.clientY; off = 0;
+    try { wheel.setPointerCapture(ev.pointerId); } catch(e){}
+  });
+  wheel.addEventListener("pointermove", (ev) => {
+    if (!active) return;
+    ev.stopPropagation();
+    const dy = ev.clientY - lastY;
+    lastY = ev.clientY;
+    off = Math.max(-52, Math.min(52, off + dy));
+    thumb.style.marginTop = (off - 17) + "px";
+    queueWheel(dy);
+  });
+  const end = (ev) => { if (!active) return; active = false; thumb.style.marginTop = "-17px"; ev.stopPropagation(); };
+  wheel.addEventListener("pointerup", end);
+  wheel.addEventListener("pointercancel", end);
+})();
+
+// ================= スクリーンショット / 録画(この端末に保存) =================
+function dlBlob(blob, name){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function tsStamp(){
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  return "" + d.getFullYear() + z(d.getMonth()+1) + z(d.getDate()) + "_" + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds());
+}
+$("shotBtn").onclick = () => {
+  if (!video.videoWidth){ log("映像を受信していません"); return; }
+  const c = document.createElement("canvas");
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext("2d").drawImage(video, 0, 0);
+  c.toBlob((b) => { if (b){ dlBlob(b, "dss_" + tsStamp() + ".png"); log("スクリーンショットを保存しました"); } }, "image/png");
+};
+let recorder = null, recChunks = [];
+$("recBtn").onclick = () => {
+  if (recorder){ recorder.stop(); return; }
+  if (!video.srcObject){ log("映像を受信していません"); return; }
+  const st = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+  try { recorder = new MediaRecorder(st, { mimeType: "video/webm" }); }
+  catch(e){ try { recorder = new MediaRecorder(st); } catch(e2){ log("この環境では録画できません"); return; } }
+  recChunks = [];
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = () => {
+    dlBlob(new Blob(recChunks, { type: "video/webm" }), "dss_" + tsStamp() + ".webm");
+    recorder = null; recChunks = [];
+    $("recBtn").textContent = "録画"; $("recBtn").classList.remove("rec-on");
+    log("録画を保存しました(webm)");
+  };
+  recorder.start(1000);
+  $("recBtn").textContent = "⏹録画中"; $("recBtn").classList.add("rec-on");
+  log("録画を開始しました(この端末に保存されます。音声はミュート解除中のみ)");
+};
+
+// ================= PC音量(メディアキー) / 画面OFF =================
+$("volUp").onclick = () => sendControl({ type: "key", key: "volup" });
+$("volDown").onclick = () => sendControl({ type: "key", key: "voldown" });
+$("volMute").onclick = () => sendControl({ type: "key", key: "volmute" });
+$("monOff").onclick = () => { sendControl({ type: "power", action: "monoff" }); log("PCのモニターをオフにしました(マウス操作で復帰)"); };
+
+// ================= クリップボード同期(テキスト) =================
+let rxClip = "";
+$("clipToPc").onclick = async () => {
+  let t = "";
+  try { t = await navigator.clipboard.readText(); } catch(e){}
+  if (!t) t = prompt("PCへ送るテキストを貼り付けてください") || "";
+  if (!t) return;
+  sendControl({ type: "clip", text: t.slice(0, 100000) });
+  log("クリップボードをPCへ送信しました");
+};
+$("clipFromPc").onclick = async () => {
+  if (!rxClip) return;
+  try { await navigator.clipboard.writeText(rxClip); log("PCのコピーをこの端末に保存しました"); }
+  catch(e){ prompt("自動コピーできない環境です。長押しでコピーしてください", rxClip); }
+};
+
+// ================= リモートカーソル形状 =================
+// 状態色のリング(クリック=黄/右=青/ドラッグ=桃)は維持し、中央の形だけ変える。
+function setCursorKind(kind){
+  const known = ["arrow","ibeam","hand","wait","cross","ns","we","nwse","nesw","all","no"];
+  vptr.dataset.kind = known.includes(kind) ? kind : "arrow";
+}
+setCursorKind("arrow");
+
+// ================= セキュアデスクトップ検知 → 再配信の自動マスク =================
+let rsSecure = false, rsMaskStream = null, rsMaskTimer = null;
+function rsOnSecure(on){
+  rsSecure = !!on;
+  if (on) log("セキュアデスクトップ(UAC等)を検知: この間は操作できません");
+  if (!rsOn || $("rsSource").value !== "desktop") return;
+  if (on){
+    rsLog("配信画面を一時マスクします");
+    rsApplyMask();
+  } else {
+    rsLog("マスクを解除します");
+    rsClearMask();
+    rsSwitchSource(); // デスクトップ映像を取り直して復帰
+  }
+}
+function rsApplyMask(){
+  if (!rsCanvas){ rsCanvas = document.createElement("canvas"); rsCanvas.width = 1280; rsCanvas.height = 720; }
+  const ctx = rsCanvas.getContext("2d");
+  const draw = () => {
+    ctx.fillStyle = "#0d1116"; ctx.fillRect(0, 0, 1280, 720);
+    ctx.fillStyle = "#8a93a0"; ctx.font = "44px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("画面は一時的に非表示です", 640, 360);
+  };
+  draw();
+  if (rsMaskTimer) clearInterval(rsMaskTimer);
+  rsMaskTimer = setInterval(draw, 500);
+  rsMaskStream = rsCanvas.captureStream(5);
+  const t = rsMaskStream.getVideoTracks()[0];
+  rsVideoTrack = t;
+  for (const s of rsSlots){ if (s && s.vSender){ try { s.vSender.replaceTrack(t); } catch(e){} } }
+}
+function rsClearMask(){
+  if (rsMaskTimer){ clearInterval(rsMaskTimer); rsMaskTimer = null; }
+  if (rsMaskStream){ rsMaskStream.getTracks().forEach(t => t.stop()); rsMaskStream = null; }
+}
+
+// ================= ファイル送信(この端末 → PC) =================
+$("fileSend").addEventListener("change", async (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  if (!control || control.readyState !== "open"){ log("接続してから送信してください"); e.target.value = ""; return; }
+  const CHUNK = 16000;
+  sendControl({ type: "file-begin", fname: f.name, fsize: f.size });
+  const buf = await f.arrayBuffer();
+  let sent = 0;
+  const prog = $("fileProg");
+  while (sent < buf.byteLength){
+    if (!control || control.readyState !== "open"){ prog.textContent = "切断のため中断しました"; e.target.value = ""; return; }
+    // 送信バッファの詰まり対策: 溜まっていたら少し待つ
+    if (control.bufferedAmount > 1024 * 1024){ await new Promise(r => setTimeout(r, 50)); continue; }
+    control.send(buf.slice(sent, sent + CHUNK));
+    sent += CHUNK;
+    prog.textContent = "送信中… " + Math.min(100, Math.round(sent / buf.byteLength * 100)) + "%";
+  }
+  sendControl({ type: "file-end" });
+  prog.textContent = "送信完了(保存結果はログに表示されます)";
+  e.target.value = "";
+});
+
+// ================= Wake on LAN =================
+$("wolMac").value = localStorage.getItem("dss_wol_mac") || "";
+$("wolSend").onclick = () => {
+  const mac = $("wolMac").value.trim();
+  if (!/^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$/.test(mac)){ log("MACアドレスの形式が正しくありません"); return; }
+  localStorage.setItem("dss_wol_mac", mac);
+  sendControl({ type: "wol", mac });
+  log("WoLパケットの送信を指示しました: " + mac);
 };
 
 </script>
