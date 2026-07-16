@@ -42,7 +42,7 @@
   }
   video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
   #unmute {
-    margin-left: 8px; flex: none;
+    flex: none;
     padding: 6px 10px; min-height: 34px; font: inherit; font-size: 12px; color: #e6e8ea;
     background: #161b21; border: 1px solid #2a323b; border-radius: 6px;
     cursor: pointer; touch-action: manipulation; display: none;
@@ -189,7 +189,6 @@
   <span id="dot"></span>
   <h1>DESKTOP STREAM 視聴</h1>
   <span id="status" role="status" aria-live="polite">準備中…</span>
-  <button id="unmute">🔇 音声ON</button>
 </header>
 
 <!-- 視聴前のユーザー名入力ゲート: 名前を入れるまで視聴を開始しない -->
@@ -218,9 +217,10 @@
   </div>
   <div id="cmWrap">
     <div id="vrow">
+      <button id="unmute">🔇 音声ON</button>
       <button id="fsBtn" aria-label="全画面表示">⛶</button>
-      <span class="volgrp"><span class="vlabel">🎬動画</span><input id="volDesk" type="range" min="0" max="100" value="50" aria-label="動画音声の音量" /></span>
-      <span class="volgrp"><span class="vlabel">🎙マイク</span><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
+      <span class="volgrp"><span class="vlabel">🎬動画</span><input id="volDesk" type="range" min="0" max="100" value="30" aria-label="動画音声の音量" /></span>
+      <span class="volgrp"><span class="vlabel">🎙配信者マイク</span><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
     </div>
     <div id="comments" aria-label="コメント一覧"></div>
     <div id="cmForm">
@@ -353,14 +353,29 @@ async function onWsMessage(ev){
 // 受信するOpus音声の要求条件をSDPに追記する。
 // fmtpは「受信側が何をどう送ってほしいか」の宣言なので、視聴側のSDPを
 // 書き換えることで配信側エンコーダの動作(モノラル化・約32kbps・無音間引き)を避ける。
+// 【音質ポリシー】このプロジェクトの音声はオリジナル音質のまま処理する。
+// 音声は「配信者マイク」「PC音声」の2本のm-lineがあるため、
+// 全てのOpusペイロードの全fmtp行(=全m-line)に適用すること。
+// (以前は最初のfmtp行しか書き換えておらず、2本目がモノラル・低ビットレート・
+//  DTX有効のままエンコードされて「こもった音」になる不具合があった)
 function tuneOpus(sdp){
-  const m = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/);
-  if (!m) return sdp;
-  const pt = m[1];
   const extra = "stereo=1;sprop-stereo=1;maxaveragebitrate=256000;usedtx=0";
-  const re = new RegExp("a=fmtp:" + pt + " ([^\\r\\n]*)");
-  if (re.test(sdp)) return sdp.replace(re, (mm, p) => "a=fmtp:" + pt + " " + p + ";" + extra);
-  return sdp.replace(m[0], m[0] + "\r\na=fmtp:" + pt + " " + extra);
+  const pts = new Set();
+  const rm = /a=rtpmap:(\d+) opus\/48000\/2/g;
+  let m;
+  while ((m = rm.exec(sdp))) pts.add(m[1]);
+  for (const pt of pts){
+    if (sdp.indexOf("a=fmtp:" + pt + " ") !== -1){
+      // 既存のfmtp行(各m-lineに1行ずつある)全てに追記する
+      const fre = new RegExp("a=fmtp:" + pt + " ([^\\r\\n]*)", "g");
+      sdp = sdp.replace(fre, (mm, p) => "a=fmtp:" + pt + " " + p + ";" + extra);
+    } else {
+      // fmtp行が無い場合はrtpmap行(各m-lineに1行ずつある)の直後に挿入する
+      const rre = new RegExp("(a=rtpmap:" + pt + " opus/48000/2)", "g");
+      sdp = sdp.replace(rre, "$1\r\na=fmtp:" + pt + " " + extra);
+    }
+  }
+  return sdp;
 }
 
 async function startPeer(){
@@ -580,8 +595,11 @@ $("cmSend").onclick = sendComment;
 $("cmText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) sendComment(); });
 
 // ---- 音声再生: 受信した2本の音声トラック(マイク/PC音声)をWeb Audioで個別に鳴らす ----
-// 音量バランスは「🎬動画(PC音声)」「🎙マイク(配信者)」の2本のスライダーで調整する。
-// 既定はマイクの方が大きい(マイク100% / 動画50%)。
+// 【音質ポリシー】このプロジェクトの音声はオリジナル音質のまま処理する。
+// 加工(フィルター・ノイズ抑制等)は追加しない。Web Audioはトラックごとの
+// 音量(ゲイン)調整だけに使う。
+// 音量バランスは「🎬動画(PC音声)」「🎙配信者マイク」の2本のスライダーで調整する。
+// 既定はマイクの方が大きい(配信者マイク100% / 動画30%)。
 let actx = null;                 // AudioContext(初回のトラック受信時に生成)
 let audioMap = null;             // {mic, desk}: 配信側から届くmid対応表
 const audioNodes = new Map();    // mid -> { track, gain, el }
@@ -591,7 +609,7 @@ function volPref(key, defVal){
   const v = parseInt(localStorage.getItem(key), 10);
   return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : defVal;
 }
-$("volDesk").value = volPref("dss_view_vol_desk", 50);
+$("volDesk").value = volPref("dss_view_vol_desk", 30); // 既定: 動画30% / 配信者マイク100%(マイクを大きく)
 $("volMic").value  = volPref("dss_view_vol_mic", 100);
 
 function ensureAudioCtx(){
