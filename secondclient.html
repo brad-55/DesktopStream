@@ -56,6 +56,14 @@
     cursor: pointer; touch-action: manipulation; display: none;
   }
   #retry.on { display: block; }
+  #soundOnly {
+    position: absolute; inset: 0; display: none;
+    font-size: 20px; font-weight: 700; letter-spacing: .1em; color: #cfd6dd;
+    background: #0d1116; pointer-events: none;
+    align-items: center; justify-content: center;
+  }
+  /* JSで display を "" にすると下記のflexが効く */
+  #soundOnly:not([style*="none"]) { display: flex; }
   #ovMsg {
     position: absolute; left: 0; right: 0; top: 38%; text-align: center;
     color: #8a93a0; font-size: 13px; padding: 0 16px; pointer-events: none;
@@ -104,6 +112,36 @@
     .stage { flex: 0 1 auto; width: auto; height: 100%; max-height: 100%; max-width: 62%; }
     #cmWrap { flex: 1 1 300px; min-width: 260px; }
   }
+  /* プレーヤー下の操作行 */
+  #vrow { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px; }
+  #vrow #fsBtn {
+    flex: none; min-height: 36px; padding: 6px 12px; font: inherit; font-size: 14px;
+    background: #161b21; color: #e6e8ea; border: 1px solid #2a323b; border-radius: 6px;
+    cursor: pointer; touch-action: manipulation;
+  }
+  #volSlider { flex: none; width: 110px; accent-color: #2ecf8e; }
+  #bTitle {
+    flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: #cfd6dd;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* コメントのアバター(画像 or 頭文字の丸) */
+  .cm-av {
+    width: 20px; height: 20px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #0d1116; overflow: hidden;
+    vertical-align: middle; border: none; padding: 0; cursor: default;
+  }
+  .cm-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #myAv { width: 44px; height: 44px; cursor: pointer; font-size: 18px; background: #8a93a0; }
+  .cm .cm-av { margin-right: 6px; }
+  .cm-host { color: #ffd479 !important; font-weight: 700; }
+  .ng-icon-row { display: flex; align-items: center; gap: 10px; }
+  .ng-icon-row button#ngIconBtn {
+    flex: 1; min-height: 40px; padding: 8px; font: inherit; font-size: 13px;
+    background: #161b21; color: #cfd6dd; border: 1px solid #2a323b; border-radius: 8px;
+    cursor: pointer; touch-action: manipulation;
+  }
+  #ngIconPrev { width: 40px; height: 40px; font-size: 16px; background: #8a93a0; }
   /* ユーザー名ゲート */
   #nameGate {
     position: fixed; inset: 0; z-index: 100; background: rgba(9,12,15,.92);
@@ -138,8 +176,14 @@
 <!-- 視聴前のユーザー名入力ゲート: 名前を入れるまで視聴を開始しない -->
 <div id="nameGate">
   <div class="ng-box">
-    <div class="ng-title">ユーザー名を入力してください</div>
+    <div class="ng-title" id="ngTitle">ユーザー名を入力してください</div>
     <input id="ngName" type="text" maxlength="20" placeholder="名前" autocomplete="nickname" />
+    <input id="ngPass" type="text" maxlength="20" placeholder="合言葉" style="display:none" />
+    <div class="ng-icon-row">
+      <button id="ngIconBtn" type="button">アイコンを選ぶ(任意)</button>
+      <span id="ngIconPrev" class="cm-av"></span>
+    </div>
+    <input id="ngIconFile" type="file" accept="image/*" style="display:none" />
     <button id="ngGo">視聴をはじめる</button>
   </div>
 </div>
@@ -148,11 +192,19 @@
   <div class="stage">
     <video id="player" autoplay playsinline muted></video>
     <div id="ovMsg">配信を探しています…</div>
+    <div id="soundOnly">♪ Sound Only</div>
     <button id="retry">↻ もう一度さがす</button>
   </div>
   <div id="cmWrap">
+    <div id="vrow">
+      <button id="fsBtn" aria-label="全画面表示">⛶</button>
+      <input id="volSlider" type="range" min="0" max="100" value="100" aria-label="音量" />
+      <div id="bTitle"></div>
+    </div>
     <div id="comments" aria-label="コメント一覧"></div>
     <div id="cmForm">
+      <button id="myAv" type="button" class="cm-av" aria-label="アイコンを変更" title="アイコンを変更"></button>
+      <input id="avFile" type="file" accept="image/*" style="display:none" />
       <input id="cmColor" type="color" title="コメントの色" aria-label="コメントの色" />
       <input id="cmName" type="text" placeholder="名前" maxlength="20" />
       <input id="cmText" type="text" placeholder="コメントを入力" maxlength="200" disabled />
@@ -202,6 +254,7 @@ async function scan(){
     return;
   }
   ended = false;
+  gotEnd = false;
   $("retry").classList.remove("on");
   let sawEmpty = false, sawFull = false;
   for (let i = 1; i <= roomCount; i++){
@@ -247,7 +300,7 @@ function tryRoom(room){
         if (!m.isExistClient){ finish("empty"); return; } // 配信側がこの部屋に居ない
         // 配信側が居る: この接続を本接続に昇格し、こちらからofferする
         ws = w;
-        w.onclose = () => onEnded("配信が終了しました");
+        w.onclose = () => onEnded("接続が切れました");
         w.onerror = () => {};
         w.onmessage = onWsMessage;
         try { await startPeer(); finish("joined", true); }
@@ -272,7 +325,7 @@ async function onWsMessage(ev){
       return;
     }
     if (m.type === "candidate" && m.ice){ if (pc){ try { await pc.addIceCandidate(m.ice); } catch(e){} } return; }
-    if (m.type === "bye"){ onEnded("配信が終了しました"); return; }
+    if (m.type === "bye"){ onEnded("接続が切れました"); return; }
   } catch(e){}
 }
 
@@ -296,9 +349,14 @@ async function startPeer(){
     if (e.streams && e.streams[0] && video.srcObject !== e.streams[0]) video.srcObject = e.streams[0];
     setOverlay("");
     $("unmute").classList.add("on");
+    startSoundOnlyWatch();
   };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === "connected"){ setStatus("視聴中", "ok"); }
+    if (pc.connectionState === "connected"){
+      setStatus("視聴中", "ok");
+      retryCount = 0; // 接続できたらリトライ回数を戻す
+      acquireViewLock();
+    }
     if (pc.connectionState === "failed" || pc.connectionState === "closed") onEnded("接続が切れました");
   };
   pc.addTransceiver("video", { direction: "recvonly" });
@@ -306,14 +364,40 @@ async function startPeer(){
   dc = pc.createDataChannel("comment");
   dc.onopen = () => {
     enableComment(true);
-    // 配信者側の視聴者一覧に表示される名前を通知する
+    // 名前・アイコン・合言葉を配信者へ通知する(合言葉が必要な配信では検証される)
     const nm = ($("cmName").value.trim() || localStorage.getItem("dss_view_name") || "名無し").slice(0, 20);
-    try { dc.send(JSON.stringify({ type: "hello", name: nm })); } catch(e){}
+    try {
+      dc.send(JSON.stringify({
+        type: "hello",
+        name: nm,
+        icon: myIcon(),
+        pass: localStorage.getItem("dss_view_pass") || "",
+      }));
+    } catch(e){}
   };
   dc.onclose = () => enableComment(false);
   dc.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
-    if (m.type === "comment") addComment(m.name, m.text, m.ts, m.color);
+    if (m.type === "comment") addComment(m.name, m.text, m.ts, m.color, m.icon, m.host);
+    if (m.type === "welcome"){
+      // タイトル表示と、途中参加でも読めるようにコメント履歴を反映
+      const t = String(m.title || "").slice(0, 40);
+      $("bTitle").textContent = t;
+      if (t) document.title = t + " - 視聴中";
+      if (Array.isArray(m.list)){
+        $("comments").innerHTML = "";
+        for (const c of m.list) addComment(c.name, c.text, c.ts, c.color, c.icon, c.host);
+      }
+    }
+    if (m.type === "end"){
+      gotEnd = true;
+      onEnded("配信は終了しました", true);
+    }
+    if (m.type === "badpass"){
+      gotEnd = true;
+      onEnded("", true);
+      showGate("この配信には合言葉が必要です", true);
+    }
   };
   const offer = await pc.createOffer();
   const sdp = tuneOpus(offer.sdp);
@@ -321,19 +405,74 @@ async function startPeer(){
   ws.send(JSON.stringify({ type: "offer", sdp }));
 }
 
-function onEnded(msg){
+// noRetry=true: 配信終了・合言葉不一致など、自動再接続すべきでない切断
+// 受信映像がほぼ真っ黒(=配信側が静止画未選択などで無映像)なら "Sound Only" を表示する。
+let soundOnlyTimer = null, soundCanvas = null;
+function startSoundOnlyWatch(){
+  if (soundOnlyTimer) return;
+  soundCanvas = document.createElement("canvas");
+  soundCanvas.width = 40; soundCanvas.height = 24;
+  soundOnlyTimer = setInterval(() => {
+    if (!video.videoWidth){ return; }
+    try {
+      const ctx = soundCanvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, 40, 24);
+      const d = ctx.getImageData(0, 0, 40, 24).data;
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i+1] + d[i+2];
+      const avg = sum / (d.length / 4 * 3); // 0..255
+      const dark = avg < 8;
+      $("soundOnly").style.display = dark ? "" : "none";
+    } catch(e){ /* CORS等で読めない場合は判定しない */ }
+  }, 700);
+}
+function stopSoundOnlyWatch(){
+  if (soundOnlyTimer){ clearInterval(soundOnlyTimer); soundOnlyTimer = null; }
+  $("soundOnly").style.display = "none";
+}
+
+function onEnded(msg, noRetry){
   if (ended) return;
   ended = true;
   enableComment(false);
-  setStatus("切断", "err");
-  setOverlay(msg);
-  $("retry").classList.add("on");
+  releaseViewLock();
   try { pc && pc.close(); } catch(e){}
   try { ws && ws.close(); } catch(e){}
   pc = null; ws = null; dc = null;
   video.srcObject = null;
   $("unmute").classList.remove("on");
+  stopSoundOnlyWatch();
+  if (noRetry || gotEnd){
+    setStatus("終了", "err");
+    if (msg) setOverlay(msg);
+    $("retry").classList.add("on");
+    return;
+  }
+  // 事故切断: 自動で再接続を試みる(間隔を広げながら最大8回)
+  retryCount++;
+  if (retryCount > 8){
+    setStatus("切断", "err");
+    setOverlay("再接続できませんでした");
+    $("retry").classList.add("on");
+    return;
+  }
+  const wait = Math.min(15000, 2000 * retryCount);
+  setStatus(`再接続します… (${retryCount}回目)`, "warn");
+  setOverlay(msg + "。自動で再接続します…");
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(scan, wait);
 }
+let gotEnd = false, retryCount = 0, retryTimer = null;
+
+// 視聴中の画面スリープ防止
+let viewLock = null;
+async function acquireViewLock(){
+  try { if ("wakeLock" in navigator) viewLock = await navigator.wakeLock.request("screen"); } catch(e){}
+}
+function releaseViewLock(){ try { if (viewLock) viewLock.release(); } catch(e){} viewLock = null; }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && pc && pc.connectionState === "connected") acquireViewLock();
+});
 
 // ---- コメント ----
 $("cmName").value = localStorage.getItem("dss_view_name") || "";
@@ -348,19 +487,38 @@ const CM_PALETTE = ["#7fd1ff", "#ffd479", "#a5f3b4", "#ff9db0", "#d3b4ff", "#ffb
   $("cmColor").value = c;
 })();
 $("cmColor").addEventListener("change", () => localStorage.setItem("dss_view_color", $("cmColor").value));
-function addComment(name, text, ts, color){
+function validIcon(v){
+  v = String(v || "");
+  return (v.startsWith("data:image/") && v.length < 20000) ? v : "";
+}
+function avatarEl(name, color, icon, host){
+  const av = document.createElement("span");
+  av.className = "cm-av";
+  const ic = validIcon(icon);
+  if (ic){
+    const img = document.createElement("img");
+    img.src = ic;
+    av.appendChild(img);
+  } else {
+    av.style.background = host ? "#ffd479" : (/^#[0-9a-fA-F]{6}$/.test(color || "") ? color : "#8a93a0");
+    av.textContent = (name || "?").slice(0, 1);
+  }
+  return av;
+}
+function addComment(name, text, ts, color, icon, host){
   name = String(name || "名無し").slice(0, 20);
   text = String(text || "").slice(0, 200);
   if (!text.trim()) return;
   const box = $("comments");
   const div = document.createElement("div");
   div.className = "cm";
+  div.appendChild(avatarEl(name, color, icon, host));
   const meta = document.createElement("span");
-  meta.className = "meta";
+  meta.className = "meta" + (host ? " cm-host" : "");
   meta.textContent = new Date(ts || Date.now()).toLocaleTimeString() + " " + name;
   const body = document.createElement("span");
   body.textContent = text; // textContentで挿入(HTMLとして解釈させない)
-  if (/^#[0-9a-fA-F]{6}$/.test(color || "")){ meta.style.color = color; body.style.color = color; }
+  if (!host && /^#[0-9a-fA-F]{6}$/.test(color || "")){ meta.style.color = color; body.style.color = color; }
   div.appendChild(meta); div.appendChild(body);
   box.insertBefore(div, box.firstChild); // 最新コメントを上に表示
   while (box.childElementCount > 200) box.removeChild(box.lastChild);
@@ -372,8 +530,11 @@ function sendComment(){
   const name = $("cmName").value.trim().slice(0, 20) || "名無し";
   localStorage.setItem("dss_view_name", name);
   // 自分のコメントも配信側から全員へ中継されて戻ってくるので、ここでは表示しない
-  dc.send(JSON.stringify({ type: "comment", name, text, color: $("cmColor").value }));
+  dc.send(JSON.stringify({ type: "comment", name, text, color: $("cmColor").value, icon: myIcon() }));
   $("cmText").value = "";
+  // 連投防止: 送信後1.5秒は無効化(配信側でも同じ間隔で制限される)
+  $("cmSend").disabled = true;
+  setTimeout(() => { if (dc && dc.readyState === "open") $("cmSend").disabled = false; }, 1500);
 }
 $("cmSend").onclick = sendComment;
 $("cmText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) sendComment(); });
@@ -384,26 +545,103 @@ $("unmute").onclick = () => {
   if (!video.muted) video.play().catch(() => {});
   $("unmute").textContent = video.muted ? "🔇 音声ON" : "🔊 音声OFF";
 };
-$("retry").onclick = () => { $("retry").classList.remove("on"); scan(); };
+$("retry").onclick = () => { $("retry").classList.remove("on"); retryCount = 0; scan(); };
+
+// ---- 全画面と音量 ----
+$("fsBtn").onclick = () => {
+  const st = document.querySelector(".stage");
+  if (document.fullscreenElement || document.webkitFullscreenElement){
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else {
+    (st.requestFullscreen || st.webkitRequestFullscreen).call(st);
+  }
+};
+$("volSlider").addEventListener("input", () => {
+  video.volume = $("volSlider").value / 100;
+});
+
+// ---- アイコン(画像を48pxに縮小してdataURL保存) ----
+function myIcon(){ return validIcon(localStorage.getItem("dss_view_icon") || ""); }
+function setIconPreview(){
+  for (const id of ["myAv", "ngIconPrev"]){
+    const el = $(id);
+    if (!el) continue;
+    el.innerHTML = "";
+    const ic = myIcon();
+    if (ic){
+      const img = document.createElement("img");
+      img.src = ic;
+      el.appendChild(img);
+      el.style.background = "";
+    } else {
+      const nm = ($("cmName").value || localStorage.getItem("dss_view_name") || "?").trim();
+      el.textContent = nm.slice(0, 1) || "?";
+      el.style.background = $("cmColor") ? $("cmColor").value : "#8a93a0";
+    }
+  }
+}
+function loadIconFile(file){
+  if (!file || !file.type.startsWith("image/")) return;
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement("canvas");
+    c.width = 48; c.height = 48;
+    const ctx = c.getContext("2d");
+    // 中央を正方形に切り出して縮小
+    const s = Math.min(img.width, img.height);
+    ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 48, 48);
+    let url = c.toDataURL("image/jpeg", 0.8);
+    if (url.length >= 20000) url = c.toDataURL("image/jpeg", 0.5);
+    if (url.length < 20000){
+      localStorage.setItem("dss_view_icon", url);
+      setIconPreview();
+    }
+    URL.revokeObjectURL(img.src);
+  };
+  img.src = URL.createObjectURL(file);
+}
+$("myAv").onclick = () => $("avFile").click();
+$("avFile").addEventListener("change", (e) => { loadIconFile(e.target.files && e.target.files[0]); e.target.value = ""; });
+$("ngIconBtn").onclick = () => $("ngIconFile").click();
+$("ngIconFile").addEventListener("change", (e) => { loadIconFile(e.target.files && e.target.files[0]); e.target.value = ""; });
+$("cmColor").addEventListener("change", setIconPreview);
+setIconPreview();
+
+// ---- ゲート表示(名前必須 / 合言葉要求時の再表示) ----
+function showGate(title, needPass){
+  $("ngTitle").textContent = title || "ユーザー名を入力してください";
+  $("ngPass").style.display = needPass ? "" : "none";
+  $("ngName").value = localStorage.getItem("dss_view_name") || "";
+  $("ngPass").value = localStorage.getItem("dss_view_pass") || "";
+  $("nameGate").style.display = "";
+  (needPass ? $("ngPass") : $("ngName")).focus();
+}
 
 // 名前が保存済みならすぐ視聴開始。未入力ならゲートで入力を求める。
+// 合言葉不一致で戻された場合は showGate(…, true) で合言葉欄つきで再表示される。
+$("ngGo").onclick = () => {
+  const n = $("ngName").value.trim().slice(0, 20);
+  if (!n){ $("ngName").focus(); return; }
+  localStorage.setItem("dss_view_name", n);
+  if ($("ngPass").style.display !== "none"){
+    localStorage.setItem("dss_view_pass", $("ngPass").value.trim().slice(0, 20));
+  }
+  $("cmName").value = n;
+  $("nameGate").style.display = "none";
+  setIconPreview();
+  gotEnd = false; retryCount = 0;
+  scan();
+};
+$("ngName").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) $("ngGo").click(); });
+$("ngPass").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) $("ngGo").click(); });
 (function(){
   const saved = (localStorage.getItem("dss_view_name") || "").trim();
   if (saved){
     $("nameGate").style.display = "none";
     scan();
-    return;
+  } else {
+    showGate("", false);
   }
-  $("ngGo").onclick = () => {
-    const n = $("ngName").value.trim().slice(0, 20);
-    if (!n){ $("ngName").focus(); return; }
-    localStorage.setItem("dss_view_name", n);
-    $("cmName").value = n;
-    $("nameGate").style.display = "none";
-    scan();
-  };
-  $("ngName").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) $("ngGo").click(); });
-  $("ngName").focus();
 })();
 </script>
 </body>
