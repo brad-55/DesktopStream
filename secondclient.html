@@ -113,17 +113,36 @@
     #cmWrap { flex: 1 1 300px; min-width: 260px; }
   }
   /* プレーヤー下の操作行 */
-  #vrow { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px; }
+  #vrow { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px; flex-wrap: wrap; }
   #vrow #fsBtn {
     flex: none; min-height: 36px; padding: 6px 12px; font: inherit; font-size: 14px;
     background: #161b21; color: #e6e8ea; border: 1px solid #2a323b; border-radius: 6px;
     cursor: pointer; touch-action: manipulation;
   }
-  #volSlider { flex: none; width: 110px; accent-color: #2ecf8e; }
+  /* 音量バランス: 動画音声(PC音声)と配信者マイクの2本 */
+  .volgrp { display: flex; align-items: center; gap: 5px; flex: none; }
+  .volgrp .vlabel { font-size: 11px; color: #9aa4b0; flex: none; }
+  .volgrp input[type="range"] { width: 92px; accent-color: #2ecf8e; }
+  /* 配信タイトル: プレーヤー下部に重ねて表示。プレーヤーをタップで表示/非表示 */
   #bTitle {
-    flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: #cfd6dd;
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
+    padding: 18px 12px 8px;
+    background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,0));
+    font-size: 13px; font-weight: 700; color: #fff;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    pointer-events: none;
   }
+  #bTitle:empty { display: none; }
+  .stage.hide-title #bTitle { display: none; }
+  /* 全画面から戻るボタン: 全画面中のみ表示 */
+  #fsExit {
+    position: absolute; top: 8px; right: 8px; z-index: 5; display: none;
+    min-height: 36px; padding: 6px 12px; font: inherit; font-size: 13px; color: #e6e8ea;
+    background: rgba(13,17,22,.72); border: 1px solid rgba(58,68,80,.85); border-radius: 6px;
+    cursor: pointer; touch-action: manipulation; backdrop-filter: blur(2px);
+  }
+  .stage:fullscreen #fsExit { display: block; }
+  .stage:-webkit-full-screen #fsExit { display: block; }
   /* コメントのアバター(画像 or 頭文字の丸) */
   .cm-av {
     width: 20px; height: 20px; border-radius: 50%; flex: none;
@@ -193,13 +212,15 @@
     <video id="player" autoplay playsinline muted></video>
     <div id="ovMsg">配信を探しています…</div>
     <div id="soundOnly">♪ Sound Only</div>
+    <div id="bTitle"></div>
+    <button id="fsExit" aria-label="全画面を終了">✕ 全画面を終了</button>
     <button id="retry">↻ もう一度さがす</button>
   </div>
   <div id="cmWrap">
     <div id="vrow">
       <button id="fsBtn" aria-label="全画面表示">⛶</button>
-      <input id="volSlider" type="range" min="0" max="100" value="100" aria-label="音量" />
-      <div id="bTitle"></div>
+      <span class="volgrp"><span class="vlabel">🎬動画</span><input id="volDesk" type="range" min="0" max="100" value="50" aria-label="動画音声の音量" /></span>
+      <span class="volgrp"><span class="vlabel">🎙マイク</span><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
     </div>
     <div id="comments" aria-label="コメント一覧"></div>
     <div id="cmForm">
@@ -346,7 +367,18 @@ async function startPeer(){
   pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
   pc.onicecandidate = (e) => { if (e.candidate && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "candidate", ice: e.candidate })); };
   pc.ontrack = (e) => {
-    if (e.streams && e.streams[0] && video.srcObject !== e.streams[0]) video.srcObject = e.streams[0];
+    if (e.track.kind === "video"){
+      // 映像だけをvideo要素へ。音声はWeb Audio側で個別に鳴らす(音量バランス用)。
+      // Web Audio非対応環境では音声トラックが先にsrcObjectへ入ることがあるため保持する。
+      const cur = video.srcObject;
+      if (cur && cur.getVideoTracks && cur.getVideoTracks().length === 0){
+        cur.addTrack(e.track);
+      } else {
+        video.srcObject = new MediaStream([e.track]);
+      }
+    } else {
+      wireAudioTrack(e.transceiver ? e.transceiver.mid : null, e.track);
+    }
     setOverlay("");
     $("unmute").classList.add("on");
     startSoundOnlyWatch();
@@ -360,6 +392,8 @@ async function startPeer(){
     if (pc.connectionState === "failed" || pc.connectionState === "closed") onEnded("接続が切れました");
   };
   pc.addTransceiver("video", { direction: "recvonly" });
+  // 音声は「配信者マイク」「PC音声(動画音声)」の2トラックを別々に受ける
+  pc.addTransceiver("audio", { direction: "recvonly" });
   pc.addTransceiver("audio", { direction: "recvonly" });
   dc = pc.createDataChannel("comment");
   dc.onopen = () => {
@@ -379,6 +413,11 @@ async function startPeer(){
   dc.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
     if (m.type === "comment") addComment(m.name, m.text, m.ts, m.color, m.icon, m.host);
+    if (m.type === "audiomap"){
+      // 配信側からの「どのmidがマイク/PC音声か」の対応表
+      audioMap = { mic: (m.mic != null ? String(m.mic) : null), desk: (m.desk != null ? String(m.desk) : null) };
+      applyAudioGains();
+    }
     if (m.type === "welcome"){
       // タイトル表示と、途中参加でも読めるようにコメント履歴を反映
       const t = String(m.title || "").slice(0, 40);
@@ -440,6 +479,7 @@ function onEnded(msg, noRetry){
   try { ws && ws.close(); } catch(e){}
   pc = null; ws = null; dc = null;
   video.srcObject = null;
+  clearAudioNodes();
   $("unmute").classList.remove("on");
   stopSoundOnlyWatch();
   if (noRetry || gotEnd){
@@ -539,26 +579,119 @@ function sendComment(){
 $("cmSend").onclick = sendComment;
 $("cmText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) sendComment(); });
 
+// ---- 音声再生: 受信した2本の音声トラック(マイク/PC音声)をWeb Audioで個別に鳴らす ----
+// 音量バランスは「🎬動画(PC音声)」「🎙マイク(配信者)」の2本のスライダーで調整する。
+// 既定はマイクの方が大きい(マイク100% / 動画50%)。
+let actx = null;                 // AudioContext(初回のトラック受信時に生成)
+let audioMap = null;             // {mic, desk}: 配信側から届くmid対応表
+const audioNodes = new Map();    // mid -> { track, gain, el }
+let masterMuted = true;          // 自動再生制限のためミュートで開始
+
+function volPref(key, defVal){
+  const v = parseInt(localStorage.getItem(key), 10);
+  return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : defVal;
+}
+$("volDesk").value = volPref("dss_view_vol_desk", 50);
+$("volMic").value  = volPref("dss_view_vol_mic", 100);
+
+function ensureAudioCtx(){
+  if (actx) return actx;
+  try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ actx = null; }
+  return actx;
+}
+// 受信音声トラックをWeb Audioへ接続する。midごとにゲインノードを持つ。
+function wireAudioTrack(mid, track){
+  mid = (mid != null) ? String(mid) : ("t" + audioNodes.size);
+  if (audioNodes.has(mid)) return;
+  const ctx = ensureAudioCtx();
+  const st = new MediaStream([track]);
+  // Safari対策: リモート音声トラックはメディア要素に接続しないと
+  // Web Audioへサンプルが流れないことがあるため、ミュートした<audio>を噛ませる
+  const el = document.createElement("audio");
+  el.muted = true; el.autoplay = true;
+  el.srcObject = st;
+  el.play && el.play().catch(() => {});
+  if (!ctx){
+    // Web Audioが使えない環境: video要素に音声も入れて従来通り鳴らす(バランス調整不可)
+    try {
+      const ms = video.srcObject || new MediaStream();
+      ms.addTrack(track);
+      video.srcObject = ms;
+    } catch(e){}
+    return;
+  }
+  try {
+    const src = ctx.createMediaStreamSource(st);
+    const gain = ctx.createGain();
+    src.connect(gain).connect(ctx.destination);
+    audioNodes.set(mid, { track, gain, el });
+    applyAudioGains();
+  } catch(e){}
+}
+// スライダー値・ミュート状態・mid対応表から各トラックのゲインを決める
+function applyAudioGains(){
+  const vd = $("volDesk").value / 100;
+  const vm = $("volMic").value / 100;
+  for (const [mid, n] of audioNodes){
+    let v;
+    if (audioMap && audioMap.mic === mid) v = vm;
+    else if (audioMap && audioMap.desk === mid) v = vd;
+    else v = vd; // 対応表が未着/旧配信(ミックス済1本)は動画スライダーで調整
+    n.gain.gain.value = masterMuted ? 0 : v;
+  }
+}
+function clearAudioNodes(){
+  for (const [, n] of audioNodes){
+    try { n.gain.disconnect(); } catch(e){}
+    try { n.el.srcObject = null; } catch(e){}
+  }
+  audioNodes.clear();
+  audioMap = null;
+}
+$("volDesk").addEventListener("input", () => { localStorage.setItem("dss_view_vol_desk", $("volDesk").value); applyAudioGains(); });
+$("volMic").addEventListener("input", () => { localStorage.setItem("dss_view_vol_mic", $("volMic").value); applyAudioGains(); });
+
 // ---- 音声ON(自動再生制限のためミュートで開始) ----
 $("unmute").onclick = () => {
-  video.muted = !video.muted;
-  if (!video.muted) video.play().catch(() => {});
-  $("unmute").textContent = video.muted ? "🔇 音声ON" : "🔊 音声OFF";
+  masterMuted = !masterMuted;
+  if (!masterMuted){
+    if (actx && actx.state === "suspended") actx.resume().catch(() => {});
+    video.play().catch(() => {});
+    // Web Audio非対応フォールバック時はvideo側のミュートも解除する
+    video.muted = audioNodes.size > 0;
+  } else {
+    video.muted = true;
+  }
+  applyAudioGains();
+  $("unmute").textContent = masterMuted ? "🔇 音声ON" : "🔊 音声OFF";
 };
 $("retry").onclick = () => { $("retry").classList.remove("on"); retryCount = 0; scan(); };
 
-// ---- 全画面と音量 ----
+// ---- 全画面 ----
+function exitFs(){
+  if (document.fullscreenElement || document.webkitFullscreenElement){
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  }
+}
 $("fsBtn").onclick = () => {
   const st = document.querySelector(".stage");
   if (document.fullscreenElement || document.webkitFullscreenElement){
-    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    exitFs();
   } else {
     (st.requestFullscreen || st.webkitRequestFullscreen).call(st);
   }
 };
-$("volSlider").addEventListener("input", () => {
-  video.volume = $("volSlider").value / 100;
-});
+$("fsExit").onclick = (e) => { e.stopPropagation(); exitFs(); };
+
+// ---- タイトル表示のトグル: プレーヤーをタップすると表示/非表示 ----
+(function(){
+  const st = document.querySelector(".stage");
+  st.addEventListener("click", (e) => {
+    // ボタン類のタップではトグルしない
+    if (e.target.closest("button")) return;
+    st.classList.toggle("hide-title");
+  });
+})();
 
 // ---- アイコン(画像を48pxに縮小してdataURL保存) ----
 function myIcon(){ return validIcon(localStorage.getItem("dss_view_icon") || ""); }
