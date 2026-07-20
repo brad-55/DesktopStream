@@ -113,16 +113,20 @@
     #cmWrap { flex: 1 1 300px; min-width: 260px; }
   }
   /* プレーヤー下の操作行 */
-  #vrow { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px; flex-wrap: wrap; }
-  #vrow #fsBtn {
-    flex: none; min-height: 36px; padding: 6px 12px; font: inherit; font-size: 14px;
+  /* プレーヤー下の操作行: 2行2列(左列=スライダー / 右列=ボタン) */
+  #vrow {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center; gap: 8px 10px; padding: 2px 0 8px;
+  }
+  #vrow #fsBtn, #vrow #unmute {
+    flex: none; min-height: 36px; padding: 6px 12px; font: inherit; font-size: 13px;
     background: #161b21; color: #e6e8ea; border: 1px solid #2a323b; border-radius: 6px;
-    cursor: pointer; touch-action: manipulation;
+    cursor: pointer; touch-action: manipulation; white-space: nowrap;
   }
   /* 音量バランス: 動画音声(PC音声)と配信者マイクの2本 */
-  .volgrp { display: flex; align-items: center; gap: 5px; flex: none; }
+  .volgrp { display: flex; align-items: center; gap: 5px; min-width: 0; }
   .volgrp .vlabel { font-size: 11px; color: #9aa4b0; flex: none; }
-  .volgrp input[type="range"] { width: 92px; accent-color: #2ecf8e; }
+  .volgrp input[type="range"] { flex: 1; min-width: 0; accent-color: #2ecf8e; }
   /* 配信タイトル: プレーヤー下部に重ねて表示。プレーヤーをタップで表示/非表示 */
   #bTitle {
     position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
@@ -217,10 +221,10 @@
   </div>
   <div id="cmWrap">
     <div id="vrow">
-      <button id="unmute">🔇 音声ON</button>
-      <button id="fsBtn" aria-label="全画面表示">⛶</button>
       <span class="volgrp"><span class="vlabel">🎬動画</span><input id="volDesk" type="range" min="0" max="100" value="30" aria-label="動画音声の音量" /></span>
+      <button id="unmute">🔇 音声ON</button>
       <span class="volgrp"><span class="vlabel">🎙配信者マイク</span><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
+      <button id="fsBtn" aria-label="全画面表示">⛶ 全画面</button>
     </div>
     <div id="comments" aria-label="コメント一覧"></div>
     <div id="cmForm">
@@ -396,7 +400,12 @@ async function startPeer(){
     }
     setOverlay("");
     $("unmute").classList.add("on");
-    startSoundOnlyWatch();
+    if (gateOpen()){
+      // 先行入室中: 受信はするが再生はしない(名前入力後にngGoで再生を開始する)
+      try { video.pause(); } catch(err){}
+    } else {
+      startSoundOnlyWatch();
+    }
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "connected"){
@@ -413,12 +422,16 @@ async function startPeer(){
   dc = pc.createDataChannel("comment");
   dc.onopen = () => {
     enableComment(true);
-    // 名前・アイコン・合言葉を配信者へ通知する(合言葉が必要な配信では検証される)
-    const nm = ($("cmName").value.trim() || localStorage.getItem("dss_view_name") || "名無し").slice(0, 20);
+    // 名前・アイコン・合言葉を配信者へ通知する(合言葉が必要な配信では検証される)。
+    // 名前入力ゲート表示中(先行入室)は名前を空+pendingで送り、入力後に type:"name" で更新する。
+    const pending = gateOpen();
+    const nm = pending ? "" :
+      ($("cmName").value.trim() || localStorage.getItem("dss_view_name") || "名無し").slice(0, 20);
     try {
       dc.send(JSON.stringify({
         type: "hello",
         name: nm,
+        pending,
         icon: myIcon(),
         pass: localStorage.getItem("dss_view_pass") || "",
       }));
@@ -758,7 +771,9 @@ $("ngIconFile").addEventListener("change", (e) => { loadIconFile(e.target.files 
 $("cmColor").addEventListener("change", setIconPreview);
 setIconPreview();
 
-// ---- ゲート表示(名前必須 / 合言葉要求時の再表示) ----
+// ---- ゲート表示(名前入力 / 合言葉要求時の再表示) ----
+// ゲート表示中でも入室(Ayame接続)は先に試みる。映像は受信するが再生はしない。
+function gateOpen(){ return $("nameGate").style.display !== "none"; }
 function showGate(title, needPass){
   $("ngTitle").textContent = title || "ユーザー名を入力してください";
   $("ngPass").style.display = needPass ? "" : "none";
@@ -780,6 +795,17 @@ $("ngGo").onclick = () => {
   $("cmName").value = n;
   $("nameGate").style.display = "none";
   setIconPreview();
+  if (pc && dc && dc.readyState === "open"){
+    // 先行入室が成功済み: 再スキャンせず、名前を配信側へ通知して再生を開始する
+    try {
+      dc.send(JSON.stringify({ type: "name", name: n, icon: myIcon(),
+                               pass: localStorage.getItem("dss_view_pass") || "" }));
+    } catch(e){}
+    video.play().catch(() => {});
+    startSoundOnlyWatch();
+    return;
+  }
+  // まだ入室できていない(満員・不在・合言葉不一致で切断など): 再チャレンジ
   gotEnd = false; retryCount = 0;
   scan();
 };
@@ -791,7 +817,10 @@ $("ngPass").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isC
     $("nameGate").style.display = "none";
     scan();
   } else {
+    // 名前未入力でも先に入室だけ試みて席を確保する(映像は再生しない)。
+    // 配信側には「ユーザー名未入力」として通知され、名前入力後に更新される。
     showGate("", false);
+    scan();
   }
 })();
 </script>
