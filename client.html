@@ -73,6 +73,12 @@
     border-radius: 8px; overflow: hidden; aspect-ratio: 16/9; width: 100%; align-self: start; flex: 0 0 auto;
   }
   video { width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
+  .cap-msg {
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    background: rgba(0,0,0,.62); color: #fff; font-size: 13px;
+    padding: 6px 14px; border-radius: 14px; z-index: 6; pointer-events: none;
+    backdrop-filter: blur(2px); white-space: nowrap;
+  }
   .hint {
     position: absolute; inset: 0; display: grid; place-items: center;
     color: #5b6573; font-size: 13px; pointer-events: none;
@@ -80,19 +86,38 @@
   /* 仮想ポインタ: 見やすい二重リング */
   #zoomLayer { position:absolute; inset:0; transform-origin:0 0; }
   #zoomLayer video { width:100%; height:100%; }
+  /* 仮想ポインタ。--pc(状態色)をA/B共通で使う。既定は緑=通常。 */
   #vptr {
     position: absolute; left: 50%; top: 50%;
-    width: 10px; height: 10px; margin: -5px 0 0 -5px;
-    border: 2px solid #36d399; border-radius: 50%;
-    box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 0 8px #36d399;
-    background: rgba(54,211,153,.15);
     pointer-events: none; display: none; z-index: 5;
-    transition: transform .04s linear;
+    --pc: #36d399;
   }
   #vptr.on { display: block; }
-  #vptr.click { transform: scale(.6); border-color: #fbbd23; box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 0 12px #fbbd23; }
-  #vptr.right { border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 0 12px #60a5fa; }
-  #vptr.drag { border-color: #f472b6; background: rgba(244,114,182,.3); box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 0 14px #f472b6; }
+  #vptr.click { --pc: #fbbd23; }
+  #vptr.right { --pc: #60a5fa; }
+  #vptr.drag  { --pc: #f472b6; }
+
+  /* A: リングドット(基準点=中心)。子要素は使わず擬似要素で描く */
+  #vptr.sty-a {
+    width: 14px; height: 14px; margin: -7px 0 0 -7px;
+    border: 2px solid var(--pc); border-radius: 50%;
+    background: color-mix(in srgb, var(--pc) 15%, transparent);
+    box-shadow: 0 0 0 1.5px rgba(0,0,0,.7), 0 0 10px var(--pc);
+    transition: transform .04s linear;
+  }
+  #vptr.sty-a::after {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
+    background: #eafff6; border-radius: 50%; box-shadow: 0 0 3px rgba(0,0,0,.8);
+  }
+  #vptr.sty-a.click { transform: scale(.6); }
+  #vptr.sty-a.drag { background: color-mix(in srgb, var(--pc) 30%, transparent); }
+
+  /* B: 実カーソル型 矢印(基準点=先端=左上頂点)。SVGのfillを状態色に追従させる */
+  #vptr.sty-b { width: 0; height: 0; }
+  #vptr.sty-b svg { position: absolute; left: 0; top: 0; overflow: visible; }
+  #vptr.sty-b svg path { fill: var(--pc); stroke: #0d1116; stroke-width: 1.5; stroke-linejoin: round; }
+  #vptr.sty-b.click { transform: scale(.85); }
 
   .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   /* 主操作: ボタンを少し大きく、押しやすく */
@@ -220,24 +245,12 @@
     font-size: 13px; line-height: 1; color: #fff;
     text-shadow: 0 0 3px rgba(0,0,0,.9); pointer-events: none;
   }
-  #vptr[data-kind="ibeam"]::after { content: "I"; font-weight: 700; }
-  #vptr[data-kind="hand"]::after { content: "☝"; font-size: 11px; }
-  #vptr[data-kind="wait"]::after { content: "⏳"; font-size: 10px; }
-  #vptr[data-kind="cross"]::after { content: "+"; font-weight: 700; }
-  #vptr[data-kind="ns"]::after { content: "↕"; }
-  #vptr[data-kind="we"]::after { content: "↔"; }
-  #vptr[data-kind="nwse"]::after { content: "⤡"; }
-  #vptr[data-kind="nesw"]::after { content: "⤢"; }
-  #vptr[data-kind="all"]::after { content: "✥"; }
-  #vptr[data-kind="no"]::after { content: "🚫"; font-size: 10px; }
-  /* 矢印: 三角形の先端が円の中心に一致するよう、中心から右下へ描く */
-  #vptr[data-kind="arrow"]::after {
-    content: ""; left: 50%; top: 50%; transform: rotate(20deg); transform-origin: top left;
-    width: 0; height: 0;
-    border-left: 6px solid #fff; border-bottom: 9px solid transparent;
-    border-top: 0; border-right: 0;
-    filter: drop-shadow(0 0 2px rgba(0,0,0,.85));
-  }
+  /* リングドット(A)のときだけ、中央にカーソル形状の記号を重ねる。
+     矢印(B)はカーソル自体が矢印なので記号は重ねない(形状はdata-kindで別途切替も可) */
+  #vptr.sty-a[data-kind="ibeam"]::after { content: "I"; width:auto;height:auto;margin:0;background:none;font-size:12px;font-weight:700;color:#fff;text-shadow:0 0 3px #000;box-shadow:none; }
+  #vptr.sty-a[data-kind="hand"]::after { content: "☝"; width:auto;height:auto;margin:0;background:none;font-size:11px;box-shadow:none;text-shadow:0 0 3px #000; }
+  #vptr.sty-a[data-kind="wait"]::after { content: "⏳"; width:auto;height:auto;margin:0;background:none;font-size:10px;box-shadow:none; }
+  #vptr.sty-a[data-kind="cross"]::after { content: "+"; width:auto;height:auto;margin:0;background:none;font-weight:700;color:#fff;text-shadow:0 0 3px #000;box-shadow:none; }
   /* ショートカットのプルダウン */
   .keys select { flex: 1 1 160px; width: auto; min-width: 0; max-width: none; }
   /* 録画中の表示 */
@@ -249,11 +262,35 @@
     border-radius: 6px; margin-bottom: 6px; font-size: 12px;
   }
   .rs-viewer button { min-height: 30px; padding: 4px 10px; font-size: 11px; }
+  /* 再配信タブ・コメントタブの入力欄 */
+  #rsTitle, #rsPass, #bcText {
+    flex: 1; min-width: 120px; background: #0d1116; border: 1px solid #2a323b;
+    color: #e6e8ea; padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px;
+  }
+  /* コメントのアバター(画像 or 頭文字の丸) */
+  .cm-av {
+    width: 18px; height: 18px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #0d1116; overflow: hidden;
+    vertical-align: middle; margin-right: 6px;
+  }
+  .cm-av img { width: 100%; height: 100%; object-fit: cover; }
+  .cm-host { color: #ffd479; font-weight: 700; }
   /* WoLのMAC入力 */
   #wolMac {
     flex: 1; min-width: 150px; background: #0d1116; border: 1px solid #2a323b;
     color: #e6e8ea; padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px;
   }
+  /* 静止画クロップ */
+  #rsCropStage { position: relative; width: 100%; max-width: 360px; margin: 6px 0;
+    background: #000; border: 1px solid #2a323b; border-radius: 6px; overflow: hidden; touch-action: none; }
+  #rsCropCanvas { display: block; width: 100%; }
+  #rsCropBox { position: absolute; border: 2px solid #2ecf8e; box-shadow: 0 0 0 9999px rgba(0,0,0,.5); box-sizing: border-box; cursor: move; }
+  #rsCropBox .rh { position: absolute; width: 16px; height: 16px; background: #2ecf8e; border-radius: 50%; }
+  #rsCropBox .rh[data-h="nw"] { left: -8px; top: -8px; cursor: nwse-resize; }
+  #rsCropBox .rh[data-h="ne"] { right: -8px; top: -8px; cursor: nesw-resize; }
+  #rsCropBox .rh[data-h="sw"] { left: -8px; bottom: -8px; cursor: nesw-resize; }
+  #rsCropBox .rh[data-h="se"] { right: -8px; bottom: -8px; cursor: nwse-resize; }
   /* 全画面中の文字入力: #kbdをstage内へ移動して使う。
      入力欄の高さ(+キーボード持ち上げ分)は --kbdH で映像領域(zoomLayer)から差し引く */
   .stage.kbd-fs #zoomLayer { bottom: var(--kbdH, 64px); }
@@ -276,6 +313,20 @@
   /* ピンチズーム中のみ表示されるリセットボタン */
   #zoomReset { position: absolute; top: 8px; left: 8px; z-index: 6; display: none; }
   #zoomReset.on { display: block; }
+  /* 再配信タブ: 配信中映像のミニプレビュー */
+  #rsPreview {
+    width: 128px; aspect-ratio: 16/9; height: auto; flex: none;
+    background: #000; border: 1px solid #2a323b; border-radius: 6px; display: block;
+  }
+  /* コメント欄: 入退室のシステム表示 */
+  .rs-comment.rs-sys { opacity: .75; font-style: italic; }
+  /* 接続タブ: 再配信の視聴者履歴 */
+  #rsRoster {
+    font-size: 12px; color: #cfd6dd; max-height: 180px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .rs-roster-row { display: flex; align-items: center; gap: 6px; }
+  .rs-roster-row.left { opacity: .55; }
   /* 再配信タブ */
   #rsComments { min-height: 120px; max-height: min(60dvh, 480px); overflow: auto; padding: 8px 10px;
     background: #0a0d10; border: 1px solid #1e242b; border-radius: 6px;
@@ -305,7 +356,8 @@
   <div class="stage">
     <div id="zoomLayer">
       <video id="v" autoplay playsinline muted></video>
-      <div id="vptr"></div>
+      <div id="vptr" class="sty-b"><svg width="22" height="30" viewBox="0 0 22 30"><path d="M1,1 L1,22 L6,17 L10,26 L13,25 L9,16 L16,16 Z"/></svg></div>
+      <div id="capMsg" class="cap-msg" style="display:none">映像を再取得中…</div>
     </div>
     <div class="hint" id="hint">Start で配信開始</div>
     <div class="stage-ov">
@@ -405,6 +457,12 @@
       <div class="controls primary-controls">
         <button id="rsToggle">📡 再配信を開始</button>
         <button id="rsMic" disabled>🎙 マイクON</button>
+        <button id="rsDeskAudio">🔊 PC音声OFF</button>
+      </div>
+      <!-- 再配信に実際に使っている映像のミニプレビュー -->
+      <div class="controls" id="rsPreviewRow" style="display:none">
+        <video id="rsPreview" autoplay playsinline muted></video>
+        <span class="hintline">↑配信中の映像</span>
       </div>
       <div class="controls">
         <span class="fld-inline"><label for="rsRooms">部屋数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
@@ -416,6 +474,18 @@
       </div>
       <div class="controls" id="rsImageRow" style="display:none">
         <input id="rsImageFile" type="file" accept="image/*" />
+      </div>
+      <div id="rsCropWrap" style="display:none">
+        <div class="hintline">枠をドラッグ/リサイズして切り取り範囲を調整(配信中は即時反映)</div>
+        <div id="rsCropStage"><canvas id="rsCropCanvas"></canvas><div id="rsCropBox"><span class="rh" data-h="nw"></span><span class="rh" data-h="ne"></span><span class="rh" data-h="sw"></span><span class="rh" data-h="se"></span></div></div>
+        <div class="controls"><button id="rsCropReset">全体に戻す</button></div>
+      </div>
+      <div class="controls">
+        <span class="fld-inline"><label for="rsTitle">タイトル</label><input id="rsTitle" type="text" maxlength="40" placeholder="配信タイトル(任意)" /></span>
+      </div>
+      <div class="controls">
+        <span class="fld-inline"><label for="rsPass">合言葉</label><input id="rsPass" type="text" maxlength="20" placeholder="未設定なら誰でも視聴可" /></span>
+        <button id="rsRegen">視聴URLを再生成</button>
       </div>
       <div class="controls">
         <span class="hintline">視聴者: <span id="rsCount">0</span> / <span id="rsCap">0</span> 人</span>
@@ -436,11 +506,25 @@
     <div class="tabpage" id="tab-comment">
       <div class="fld">
         <label>視聴者コメント(再配信)</label>
+        <div class="controls">
+          <input id="bcText" type="text" maxlength="200" placeholder="配信者としてコメント" />
+          <button id="bcSend">送信</button>
+        </div>
         <div id="rsComments"></div>
       </div>
     </div>
 
     <div class="tabpage" id="tab-settings">
+      <div class="setting-card">
+        <span class="sc-label">マウスポインタの形</span>
+        <span class="sc-desc">操作中に表示される仮想ポインタのデザイン</span>
+        <div class="sc-row">
+          <select id="ptrStyle">
+            <option value="b">矢印(既定)</option>
+            <option value="a">リングドット</option>
+          </select>
+        </div>
+      </div>
       <div class="setting-card">
         <span class="sc-label">ファイルをPCへ送る</span>
         <span class="sc-desc">選んだファイルをPC側の received フォルダに保存します</span>
@@ -480,6 +564,11 @@
             <button id="roomBtn">ルームID入力</button>
           </div>
           <span id="roomState">room: 未設定</span>
+        </div>
+
+        <div class="setting-card">
+          <span class="sc-label">再配信の視聴者履歴</span>
+          <div id="rsRoster">まだ視聴者はいません</div>
         </div>
 
         <div class="setting-card">
@@ -646,6 +735,10 @@ async function setupPeer() {
       video.srcObject = e.streams[0];
       log("track:", e.track.kind);
     }
+    // 再配信中なら、新しい受信ストリーム/追加トラックから映像・PC音声を取り直す。
+    // 音声トラックが映像より遅れて届いてもdebounceで1回にまとまり、取りこぼさない。
+    // (ontrackはネゴシエーション時にしか発火しないため、通常視聴中のコストはゼロ)
+    rsScheduleReacquire("受信ストリーム更新");
     applyBuffer(); // 受信トラックにバッファ設定を反映
     // モバイルの自動再生制限対策: まずミュートで再生を通す。
     video.muted = true;
@@ -727,6 +820,11 @@ function wireControl(ch) {
           updateGuide("connected","on"); // Start/Stopの最終状態を反映
         }
         else { authed = false; setState("認証拒否","err"); log("認証拒否: " + (m.reason||"")); $("start").disabled = true; }
+        return;
+      }
+      if (m.type === "captureState") {
+        const el = $("capMsg");
+        if (el) el.style.display = (m.state === "restarting") ? "" : "none";
         return;
       }
       if (m.type === "cpu") { serverCPU = m.server; }
@@ -1050,6 +1148,7 @@ function drawPtr(){
   const v = videoRect();
   vptr.style.left = (v.ox + vpx)+"px";
   vptr.style.top  = (v.oy + vpy)+"px";
+  // A/Bとも基準点は要素の(left,top)。Aは中心マージン、BはSVG左上頂点=先端で合わせてある。
 }
 
 // 仮想ポインタの表示位置を更新(全画面切り替え時のレターボックス補正を含む)
@@ -1138,6 +1237,7 @@ function sendClick(button){
 function attachPointer(el, activeFn){
   el.addEventListener("pointerdown", (ev) => {
     if (padTwoFinger) return; // パッド2本指スクロール中は通常のポインタ操作を止める
+    if (ev.pointerType === "touch" && !ev.isPrimary) return; // 2本目以降の指はスクロール用(タップ扱いしない)
     if (!mouseEnabled() || !activeFn()) return;
     ev.preventDefault();
     tpActive = true; lpFired = false;
@@ -1343,12 +1443,18 @@ const RS_MAX_VIDEO_BPS = 500 * 1000; // 視聴者1人あたりの映像ビット
 let rsOn = false;
 let rsSlots = [];            // 部屋ごとの状態 {i, room, ws, pc, dc, vSender, closed}
 let rsMicStream = null, rsMicTrack = null;
+// PC音声(受信中のデスクトップ音声)をWeb Audio経由で独立トラック化するための状態。
+// マイクとはミックスせず、それぞれ別トラックで送って視聴側で音量バランスを調整させる。
+let rsAudioCtx = null, rsAudioDest = null, rsDeskTrack = null;
+let rsDeskNode = null, rsDeskGain = null;
+let rsDeskAudioOn = (localStorage.getItem("dss_rs_deskaudio") === "1");
 let rsMuted = false;
 let rsVideoTrack = null;     // 現在配信中の映像トラック
 let rsCamStream = null;      // カメラ入力(使用時のみ)
 let rsCanvas = null, rsCanvasTimer = null, rsCanvasStream = null; // 静止画用
 let rsDesktopStream = null;  // video.captureStream() の結果
 let rsImageEl = null;        // 選択された静止画
+let rsCropRect = null;       // 静止画のクロップ範囲(正規化 {x,y,w,h})
 
 let rsBase = localStorage.getItem("dss_rs_base") || "";
 if (rsBase.length !== 32) {
@@ -1380,9 +1486,13 @@ async function rsGetVideoTrack(kind){
     rsCanvasTimer = setInterval(rsDrawImage, 500); // 静止画でもフレームが流れ続けるように
     return rsCanvasStream.getVideoTracks()[0];
   }
-  // desktop: プレーヤーで受信中の映像をそのまま利用(送信時にブラウザが再エンコードする)
+  // desktop: プレーヤーで受信中の映像をそのまま利用(送信時にブラウザが再エンコードする)。
+  // captureStreamは受信映像と同一トラックを返すため stop してはいけない。
+  // 一度だけ生成して使い回し、rsStopSourceExtras でも停止対象にしない。
   if (!video.srcObject) throw new Error("リモートデスクトップを受信していません(先にStartしてください)");
-  rsDesktopStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+  if (!rsDesktopStream){
+    rsDesktopStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+  }
   const t = rsDesktopStream.getVideoTracks()[0];
   if (!t) throw new Error("プレーヤーに映像がありません");
   return t;
@@ -1391,21 +1501,39 @@ function rsDrawImage(){
   const ctx = rsCanvas.getContext("2d");
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, rsCanvas.width, rsCanvas.height);
   if (rsImageEl && rsImageEl.complete && rsImageEl.naturalWidth){
-    const ar = rsImageEl.naturalWidth / rsImageEl.naturalHeight;
+    // クロップ範囲(正規化 0..1)を元画像のピクセルに変換して切り出す
+    const iw = rsImageEl.naturalWidth, ih = rsImageEl.naturalHeight;
+    const cr = rsCropRect || { x: 0, y: 0, w: 1, h: 1 };
+    const sx = cr.x * iw, sy = cr.y * ih, sw = cr.w * iw, sh = cr.h * ih;
+    const ar = sw / sh;
     const car = rsCanvas.width / rsCanvas.height;
     let w, h;
     if (ar > car){ w = rsCanvas.width; h = w / ar; } else { h = rsCanvas.height; w = h * ar; }
-    ctx.drawImage(rsImageEl, (rsCanvas.width - w) / 2, (rsCanvas.height - h) / 2, w, h);
-  } else {
-    ctx.fillStyle = "#8a93a0"; ctx.font = "40px sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("静止画が未選択です", rsCanvas.width / 2, rsCanvas.height / 2);
+    ctx.drawImage(rsImageEl, sx, sy, sw, sh, (rsCanvas.width - w) / 2, (rsCanvas.height - h) / 2, w, h);
   }
+  // 静止画が未選択のときは黒画面のまま(視聴側が Sound Only と表示する)
 }
 function rsStopSourceExtras(){
+  // 切替のたびに呼ばれる。canvas(静止画)とカメラは停止してよいが、
+  // desktopのcaptureStreamは受信映像と同一トラックのため停止しない(切替で映像が止まる原因)。
   if (rsCanvasTimer){ clearInterval(rsCanvasTimer); rsCanvasTimer = null; }
   if (rsCanvasStream){ rsCanvasStream.getTracks().forEach(t => t.stop()); rsCanvasStream = null; }
   if (rsCamStream){ rsCamStream.getTracks().forEach(t => t.stop()); rsCamStream = null; }
+}
+// 再配信の完全停止時のみ desktop の captureStream を解放する。
+function rsStopDesktopCapture(){
   if (rsDesktopStream){ rsDesktopStream.getTracks().forEach(t => t.stop()); rsDesktopStream = null; }
+}
+// captureStreamの「参照だけ」を捨てて取り直せるようにする。
+// desktopのcaptureStreamは受信映像と同一トラックのため、生きているトラックを
+// stopするとプレーヤーの受信自体が止まってしまう(バックグラウンド復帰時など、
+// 接続が生きたまま再取得するケースで致命的)。終了済み(ended)のトラックだけ
+// 後始末し、生きているものには触らない。
+function rsDropDesktopCapture(){
+  if (rsDesktopStream){
+    rsDesktopStream.getTracks().forEach(t => { if (t.readyState === "ended"){ try { t.stop(); } catch(e){} } });
+    rsDesktopStream = null;
+  }
 }
 async function rsSwitchSource(){
   const kind = $("rsSource").value;
@@ -1413,11 +1541,83 @@ async function rsSwitchSource(){
   if (!rsOn) return;
   try {
     const t = await rsGetVideoTrack(kind);
+    if (t) t.enabled = true;
     rsVideoTrack = t;
-    // 接続済みの全視聴者のトラックを差し替える(再ネゴ不要)
-    for (const s of rsSlots){ if (s && s.vSender){ try { s.vSender.replaceTrack(t); } catch(e){} } }
+    // 接続済みの全視聴者のトラックを差し替える(再ネゴ不要)。
+    // 稀にreplaceTrackだけで描画が再開しない環境向けに、失敗時は握りつぶす。
+    for (const s of rsSlots){
+      if (s && s.vSender){ try { await s.vSender.replaceTrack(t); } catch(e){ rsLog("replace失敗(room "+rsPad3(s.i)+")"); } }
+    }
+    rsConnectDeskAudio(); // デスクトップ以外に切替時はPC音声を外し、戻ったら再接続
+    rsUpdatePreview();
     rsLog("映像ソースを切り替え:", kind);
   } catch(e){ rsLog("ソース切替失敗:", e.message || e); }
+}
+
+// 再配信タブ内のミニプレビュー: 実際に送っている映像トラックをそのまま表示する
+function rsUpdatePreview(){
+  const pv = $("rsPreview"), row = $("rsPreviewRow");
+  if (rsOn && rsVideoTrack){
+    try { pv.srcObject = new MediaStream([rsVideoTrack]); } catch(e){}
+    row.style.display = "";
+    if (pv.play) pv.play().catch(() => {});
+  } else {
+    pv.srcObject = null;
+    row.style.display = "none";
+  }
+}
+
+// ---- 映像ソースの再取得 ----
+// 再配信中にプレーヤーの受信ストリームが差し替わった(Start/再接続)とき、
+// またはバックグラウンドから復帰したときに呼ぶ。
+// video.captureStream()のキャッシュは元ストリームの差し替えで黒画面のまま
+// 固まることがあるため、捨てて取り直し、全視聴者のトラックを差し替える。
+// PC音声(rsDeskNode)も新しい受信トラックへ繋ぎ直す。
+let rsReacqTimer = null;
+function rsScheduleReacquire(reason){
+  if (!rsOn) return;
+  clearTimeout(rsReacqTimer);
+  // ontrackは映像・音声で複数回来るため、少し待って1回にまとめる
+  rsReacqTimer = setTimeout(() => rsReacquireVideo(reason), 700);
+}
+async function rsReacquireVideo(reason){
+  if (!rsOn) return;
+  // 未受信(Start前/切断中)のdesktopソースは取り直せないので保留する。
+  // 受信が戻ればontrack経由で改めて再取得がスケジュールされる。
+  if ($("rsSource").value === "desktop" && !video.srcObject){
+    rsLog("受信待ちのため映像ソースの再取得を保留します");
+    return;
+  }
+  try {
+    if ($("rsSource").value === "desktop") rsDropDesktopCapture(); // 古いcaptureStream参照を捨てて取り直す(受信トラックはstopしない)
+    const t = await rsGetVideoTrack($("rsSource").value);
+    if (t) t.enabled = true;
+    rsVideoTrack = t;
+    for (const s of rsSlots){
+      if (s && s.vSender){ try { await s.vSender.replaceTrack(t); } catch(e){} }
+    }
+    // マイクがOSに停止させられていたら取り直す(Androidのバックグラウンド等)
+    if (rsMicTrack && rsMicTrack.readyState === "ended"){
+      const oldMic = rsMicTrack;
+      await rsAcquireMic();
+      if (rsMicTrack && rsMicTrack !== oldMic){
+        for (const s of rsSlots){
+          if (!s || !s.pc) continue;
+          try {
+            const sn = s.pc.getSenders().find(x => x.track === oldMic);
+            if (sn) await sn.replaceTrack(rsMicTrack);
+          } catch(e){}
+          rsSendAudioMap(s); // sender.trackが変わったので念のため対応表を送り直す
+        }
+        rsLog("マイクを再取得しました");
+      }
+    }
+    // 復帰時にAudioContextが停止したままだとPC音声が無音になるため再開する
+    if (rsAudioCtx && rsAudioCtx.state === "suspended"){ try { rsAudioCtx.resume(); } catch(e){} }
+    rsConnectDeskAudio(); // PC音声も新しい受信ストリームの音声トラックへ繋ぎ直す
+    rsUpdatePreview();
+    rsLog("映像ソースを再取得しました(" + (reason || "") + ")");
+  } catch(e){ rsLog("映像ソースの再取得に失敗:", e.message || e); }
 }
 
 // ---- 部屋(スロット)ごとのAyame接続 ----
@@ -1514,7 +1714,10 @@ async function rsMakePeer(slot){
   slot.pc = pc2; slot.vSender = null;
   const ms = new MediaStream();
   if (rsVideoTrack) slot.vSender = pc2.addTrack(rsVideoTrack, ms);
+  // 音声はミックスせず「マイク」「PC音声」を別トラックで送り、視聴側でバランス調整させる。
+  // マイクを先に追加する(音声1本しか受けない旧視聴クライアントにはマイクを届ける)。
   if (rsMicTrack) pc2.addTrack(rsMicTrack, ms);
+  if (rsDeskTrack) pc2.addTrack(rsDeskTrack, ms);
   if (slot.vSender) rsPreferH265(pc2, slot.vSender);
   pc2.onicecandidate = (e) => { if (e.candidate && slot.ws && slot.ws.readyState === 1) slot.ws.send(JSON.stringify({ type: "candidate", ice: e.candidate })); };
   pc2.ondatachannel = (e) => { slot.dc = e.channel; rsWireComment(slot, e.channel); };
@@ -1528,6 +1731,12 @@ async function rsMakePeer(slot){
   };
 }
 function rsResetSlot(slot){
+  // 退室をコメント欄と視聴者履歴に記録する(入室済みの視聴者のみ。二重記録はjoinedフラグで防ぐ)
+  if (slot.joined){
+    slot.joined = false;
+    rsAddSystemComment(slot, "さんが退室しました");
+    rsRosterLeave(slot.rosterId);
+  }
   // 視聴者の離脱: 接続を破棄し、同じ部屋で次の視聴者を待ち直す
   if (slot.pc){ try { slot.pc.close(); } catch(e){} slot.pc = null; slot.dc = null; slot.vSender = null; }
   slot.closed = true;
@@ -1549,7 +1758,7 @@ function rsUpdateCount(){
     const row = document.createElement("div");
     row.className = "rs-viewer";
     const nm = document.createElement("span");
-    nm.textContent = "#" + s.i + " " + (s.name || "(名前未受信)");
+    nm.textContent = "#" + s.i + " " + rsSlotDispName(s);
     const btn = document.createElement("button");
     btn.textContent = "切断";
     btn.onclick = () => { rsLog(`視聴者を切断しました (room ${rsPad3(s.i)})`); rsResetSlot(s); };
@@ -1562,91 +1771,257 @@ function rsUpdateCount(){
 function rsWireComment(slot, ch){
   ch.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
-    if (m.type === "hello"){ slot.name = String(m.name || "").slice(0, 20); rsUpdateCount(); return; }
+    if (m.type === "hello"){
+      // 合言葉チェック(設定時のみ)。不一致は通知して切断する。
+      const pass = ($("rsPass").value || "").trim();
+      if (pass && String(m.pass || "") !== pass){
+        try { ch.send('{"type":"badpass"}'); } catch(e){}
+        rsLog(`合言葉が一致しないため切断しました (room ${rsPad3(slot.i)})`);
+        setTimeout(() => rsResetSlot(slot), 300);
+        return;
+      }
+      slot.name = String(m.name || "").slice(0, 20);
+      slot.icon = rsValidIcon(m.icon);
+      rsUpdateCount();
+      rsSendWelcome(slot); // タイトルとコメント履歴を渡す
+      // 入室をコメント欄(配信側のみ)と接続タブの視聴者履歴に記録する
+      if (!slot.joined){
+        slot.joined = true;
+        rsAddSystemComment(slot, "さんが入室しました", true); // 名前が後から届いたら書き換える
+        slot.rosterId = rsRosterAdd(slot);
+        rsFillRosterConn(slot); // 接続経路・アドレスは統計確定後に追記
+      }
+      return;
+    }
+    // 先行入室した視聴者からの名前入力通知: 表示名・アイコンを更新する
+    if (m.type === "name"){
+      const nm = String(m.name || "").trim().slice(0, 20);
+      if (!nm || !slot.joined) return;
+      slot.name = nm;
+      slot.icon = rsValidIcon(m.icon);
+      rsRosterUpdate(slot.rosterId, rsSlotDispName(slot), slot.icon);
+      rsUpdateJoinComment(slot);
+      rsUpdateCount(); // 視聴者一覧の名前表示も更新
+      return;
+    }
     if (m.type !== "comment") return;
+    // 連投制限: 1.5秒未満の間隔は無視する
+    const now = Date.now();
+    if (slot.lastCmt && now - slot.lastCmt < 1500) return;
+    slot.lastCmt = now;
     const color = /^#[0-9a-fA-F]{6}$/.test(String(m.color || "")) ? m.color : "";
-    const c = { name: String(m.name || "名無し").slice(0, 20), text: String(m.text || "").slice(0, 200), color, ts: Date.now() };
+    const c = {
+      name: String(m.name || "名無し").slice(0, 20),
+      text: String(m.text || "").slice(0, 200),
+      color,
+      icon: rsValidIcon(m.icon),
+      host: false,
+      ts: now,
+    };
     if (!c.text.trim()) return;
     rsAddComment(c, slot.i);
-    const relay = JSON.stringify({ type: "comment", name: c.name, text: c.text, color: c.color, ts: c.ts });
-    for (const s of rsSlots){ if (s && s.dc && s.dc.readyState === "open"){ try { s.dc.send(relay); } catch(e){} } }
+    rsPushHistory(c);
+    rsRelayAll(c);
   };
 }
 function rsAddComment(c, roomNo){
   const box = $("rsComments");
   const div = document.createElement("div");
   div.className = "rs-comment";
+  div.appendChild(rsAvatarEl(c));
   const head = document.createElement("span");
-  head.className = "rs-cmeta";
+  head.className = "rs-cmeta" + (c.host ? " cm-host" : "");
   head.textContent = new Date(c.ts).toLocaleTimeString() + " " + c.name + (roomNo ? " (#" + roomNo + ")" : "");
   const body = document.createElement("span");
   body.textContent = c.text; // textContentで挿入しHTMLとして解釈させない
-  if (c.color){ head.style.color = c.color; body.style.color = c.color; }
+  if (c.color && !c.host){ head.style.color = c.color; body.style.color = c.color; }
   div.appendChild(head); div.appendChild(body);
   box.insertBefore(div, box.firstChild); // 最新コメントを上に表示
   while (box.childElementCount > RS_MAX_COMMENTS) box.removeChild(box.lastChild);
   box.scrollTop = 0;
 }
 
+// 視聴者の表示名。先行入室(名前入力前)は空文字なので「ユーザー名未入力」と表示する
+function rsSlotDispName(slot){ return slot.name || "ユーザー名未入力"; }
+
+// ---- 入退室のシステム表示(コメント欄・配信側のみ。視聴者へは中継せず履歴にも残さない) ----
+// remember=true のとき、後から名前が届いた際に書き換えられるようDOM参照をslotに保持する
+function rsAddSystemComment(slot, suffix, remember){
+  const box = $("rsComments");
+  const div = document.createElement("div");
+  div.className = "rs-comment rs-sys";
+  div.appendChild(rsAvatarEl({ icon: slot.icon, name: slot.name }));
+  const head = document.createElement("span");
+  head.className = "rs-cmeta";
+  head.textContent = new Date().toLocaleTimeString() + " ";
+  const body = document.createElement("span");
+  body.textContent = rsSlotDispName(slot) + " (#" + slot.i + ") " + suffix; // textContentでHTML解釈を防ぐ
+  div.appendChild(head); div.appendChild(body);
+  box.insertBefore(div, box.firstChild);
+  while (box.childElementCount > RS_MAX_COMMENTS) box.removeChild(box.lastChild);
+  if (remember){ slot.joinDiv = div; slot.joinSuffix = suffix; }
+}
+// 名前入力(type:"name")が届いたら入室表示を新しい名前で書き換える
+function rsUpdateJoinComment(slot){
+  const div = slot.joinDiv;
+  if (!div || !div.isConnected) return; // 上限超過で消えていたら何もしない
+  try {
+    div.replaceChild(rsAvatarEl({ icon: slot.icon, name: slot.name }), div.firstChild);
+    div.lastChild.textContent = rsSlotDispName(slot) + " (#" + slot.i + ") " + (slot.joinSuffix || "さんが入室しました");
+  } catch(e){}
+}
+
+// ---- 視聴者履歴(接続タブ) ----
+// Ayame経由で得た視聴者情報(名前・アイコン・部屋・入退室時刻・接続経路)を一覧表示する。
+// 退室しても消さず、セッション中は残す(ページ再読込で消える)。
+let rsRoster = [];
+let rsRosterSeq = 0;
+const RS_ROSTER_MAX = 100;
+function rsRosterAdd(slot){
+  const id = ++rsRosterSeq;
+  rsRoster.unshift({ id, name: rsSlotDispName(slot), icon: slot.icon, room: slot.i,
+                     joinTs: Date.now(), leaveTs: 0, conn: "" });
+  if (rsRoster.length > RS_ROSTER_MAX) rsRoster.pop();
+  rsRenderRoster();
+  return id;
+}
+// 名前入力の反映(退室後は書き換えない: 履歴として入室時点の情報を残すが、
+// 名前は視聴中の更新なので視聴中エントリのみ対象になる)
+function rsRosterUpdate(id, name, icon){
+  const e = rsRoster.find(x => x.id === id);
+  if (e){ e.name = name; e.icon = icon; rsRenderRoster(); }
+}
+function rsRosterLeave(id){
+  const e = rsRoster.find(x => x.id === id);
+  if (e && !e.leaveTs){ e.leaveTs = Date.now(); rsRenderRoster(); }
+}
+// WebRTC統計から接続経路(P2P/TURN)と相手アドレスを取得して履歴に追記する
+async function rsFillRosterConn(slot){
+  const id = slot.rosterId, pc = slot.pc;
+  if (!id || !pc) return;
+  try {
+    await new Promise(r => setTimeout(r, 1200)); // 候補ペア確定を待つ
+    if (slot.rosterId !== id || slot.pc !== pc) return;
+    const stats = await pc.getStats();
+    let pair = null;
+    stats.forEach(s => {
+      if (s.type === "candidate-pair" && s.state === "succeeded" && (s.selected || s.nominated)) pair = s;
+    });
+    if (!pair){
+      stats.forEach(s => { if (s.type === "transport" && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId); });
+    }
+    if (!pair) return;
+    const rc = stats.get(pair.remoteCandidateId);
+    if (!rc) return;
+    const kind = rc.candidateType === "relay" ? "TURN経由" : "P2P";
+    const addr = (rc.address || rc.ip || "?") + (rc.port ? ":" + rc.port : "");
+    const e = rsRoster.find(x => x.id === id);
+    if (e){ e.conn = kind + " " + addr; rsRenderRoster(); }
+  } catch(e){}
+}
+function rsRenderRoster(){
+  const box = $("rsRoster");
+  if (!box) return;
+  box.textContent = "";
+  if (!rsRoster.length){ box.textContent = "まだ視聴者はいません"; return; }
+  for (const e of rsRoster){
+    const div = document.createElement("div");
+    div.className = "rs-roster-row" + (e.leaveTs ? " left" : "");
+    div.appendChild(rsAvatarEl({ icon: e.icon, name: e.name }));
+    const t = document.createElement("span");
+    const jt = new Date(e.joinTs).toLocaleTimeString();
+    const lt = e.leaveTs ? new Date(e.leaveTs).toLocaleTimeString() : "";
+    t.textContent = e.name + " (#" + e.room + ")  入室 " + jt +
+                    (lt ? "  退室 " + lt : "  視聴中") + (e.conn ? "  [" + e.conn + "]" : "");
+    div.appendChild(t);
+    box.appendChild(div);
+  }
+}
+
 // ---- 開始/停止とUI ----
+// マイクを取得する。rsStartのほか、バックグラウンド復帰でOSにマイクを
+// 止められた場合の再取得(rsReacquireVideo)からも呼ばれる。
+async function rsAcquireMic(){
+  rsMicTrack = null;
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
+    rsLog("この接続ではマイクを使えません(HTTPSまたはlocalhostが必要)。映像のみで配信します");
+    return;
+  }
+  try {
+    if (rsMicStream){ rsMicStream.getTracks().forEach(t => t.stop()); rsMicStream = null; }
+    // 【音質ポリシー】このプロジェクトの音声はオリジナル音質のまま処理する。
+    // 音声加工(ハイパスフィルター含む)を明示的に無効化して、素のマイク音を配信する。
+    // Android Chrome等のハイパスフィルターは音声処理チェーン(EC/NS/AGC)の一部として
+    // 働くため、3つとも無効にすることで処理チェーンごとバイパスさせる。goog系は
+    // 旧実装向けの独自キーで、非対応ブラウザでは単に無視される。
+    rsMicStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        voiceIsolation: false,
+        channelCount: { ideal: 2 },   // ステレオ対応マイクならステレオで取得
+        sampleRate: { ideal: 48000 },
+        googHighpassFilter: false,
+        googEchoCancellation: false,
+        googNoiseSuppression: false,
+        googAutoGainControl: false,
+        googTypingNoiseDetection: false, // タイピングノイズ検出も無効(音を欠落させない)
+        googAudioMirroring: false,
+      },
+    });
+    rsMicTrack = rsMicStream.getAudioTracks()[0];
+    // エンコーダにも「音楽」ヒントを与え、音声向けの帯域カット等を避ける
+    try { rsMicTrack.contentHint = "music"; } catch(e){}
+    rsMicTrack.enabled = !rsMuted;
+  } catch(e){ rsLog("マイクを取得できません(映像のみで配信):", e.name || e); }
+}
+
 async function rsStart(){
   const rooms = Math.max(1, Math.min(50, parseInt($("rsRooms").value, 10) || 10));
   $("rsRooms").value = rooms;
   // マイク(secure contextでのみ利用可能)
-  rsMicTrack = null;
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
-    try {
-      // 音声加工(ハイパスフィルター含む)を明示的に無効化して、素のマイク音を配信する。
-      // Chromeのハイパスフィルターは音声処理チェーン(EC/NS/AGC)の一部として働くため、
-      // 3つとも無効にすることで処理チェーンごとバイパスさせる。goog系は旧実装向けの
-      // 独自キーで、非対応ブラウザでは単に無視される。
-      rsMicStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          voiceIsolation: false,
-          channelCount: { ideal: 2 },   // ステレオ対応マイクならステレオで取得
-          sampleRate: { ideal: 48000 },
-          googHighpassFilter: false,
-          googEchoCancellation: false,
-          googNoiseSuppression: false,
-          googAutoGainControl: false,
-        },
-      });
-      rsMicTrack = rsMicStream.getAudioTracks()[0];
-      // エンコーダにも「音楽」ヒントを与え、音声向けの帯域カット等を避ける
-      try { rsMicTrack.contentHint = "music"; } catch(e){}
-      rsMicTrack.enabled = !rsMuted;
-    } catch(e){ rsLog("マイクを取得できません(映像のみで配信):", e.name || e); }
-  } else {
-    rsLog("この接続ではマイクを使えません(HTTPSまたはlocalhostが必要)。映像のみで配信します");
-  }
+  await rsAcquireMic();
+  // PC音声をWeb Audio経由で独立トラック化する(マイクとはミックスせず別トラックで送る)
+  rsBuildAudioMix();
   try { rsVideoTrack = await rsGetVideoTrack($("rsSource").value); }
   catch(e){ rsLog("開始できません:", e.message || e); rsStopMedia(); return; }
   rsOn = true;
   rsSlots = new Array(rooms);
   for (let i = 1; i <= rooms; i++) rsOpenSlot(i);
-  // 視聴用URL: 末尾番号は「部屋数+1」(視聴側が部屋数を割り出すための約束)
-  const url = RS_DIST_URL + "?room=" + rsBase + rsPad3(rooms + 1);
-  $("rsUrl").value = url;
-  rsShowQR(url);
+  rsShowShareUrl(); // 視聴用URL/QRを表示(開始前と同じ内容)
   $("rsToggle").textContent = "⏹ 再配信を停止";
   $("rsMic").disabled = !rsMicTrack;
+  rsUpdateDeskAudioBtn();
   $("rsRooms").disabled = true;
   $("rsCap").textContent = rooms;
   rsLog(`再配信を開始しました (${rooms}部屋, 映像${RS_MAX_VIDEO_BPS/1000}kbps固定, H.265優先)`);
+  rsAcquireWakeLock(); // 画面スリープで配信が止まるのを防ぐ
+  rsUpdatePreview();
 }
 function rsStopMedia(){
   rsClearMask();
   rsStopSourceExtras();
+  rsStopDesktopCapture();
   if (rsMicStream){ rsMicStream.getTracks().forEach(t => t.stop()); rsMicStream = null; rsMicTrack = null; }
+  rsTeardownAudioMix();
   rsVideoTrack = null;
 }
 function rsStop(){
+  // 視聴者へ「配信終了」を通知する(事故切断と区別させ、視聴側の自動再接続を止める)
+  for (const s of rsSlots){
+    if (s && s.dc && s.dc.readyState === "open"){ try { s.dc.send('{"type":"end"}'); } catch(e){} }
+  }
+  rsReleaseWakeLock();
   rsOn = false;
   for (const s of rsSlots){
     if (!s) continue;
+    // pc.close()ではconnectionstatechangeが発火しないため、ここで明示的に退室を記録する
+    if (s.joined){
+      s.joined = false;
+      rsAddSystemComment(s, "さんが退室しました(配信停止)");
+      rsRosterLeave(s.rosterId);
+    }
     s.closed = true;
     try { s.pc && s.pc.close(); } catch(e){}
     try { s.ws && s.ws.close(); } catch(e){}
@@ -1656,10 +2031,17 @@ function rsStop(){
   $("rsToggle").textContent = "📡 再配信を開始";
   $("rsMic").disabled = true;
   $("rsRooms").disabled = false;
-  $("rsUrl").value = "";
-  $("rsQr").innerHTML = "";
+  rsShowShareUrl(); // 停止後も視聴用URLは見えるようにしておく
   $("rsCount").textContent = "0"; $("rsCap").textContent = "0";
   rsLog("再配信を停止しました");
+  rsUpdatePreview();
+}
+// 現在の設定(ベースID+部屋数)から視聴用URLとQRを表示する。開始前でも呼べる。
+function rsShowShareUrl(){
+  const rooms = Math.max(1, Math.min(50, parseInt($("rsRooms").value, 10) || 10));
+  const url = RS_DIST_URL + "?room=" + rsBase + rsPad3(rooms + 1);
+  $("rsUrl").value = url;
+  rsShowQR(url);
 }
 function rsShowQR(url){
   $("rsQr").innerHTML = "";
@@ -1674,17 +2056,81 @@ function rsShowQR(url){
 $("rsToggle").onclick = () => { if (rsOn) rsStop(); else rsStart(); };
 $("rsMic").onclick = () => {
   rsMuted = !rsMuted;
-  if (rsMicTrack) rsMicTrack.enabled = !rsMuted;
+  if (rsMicTrack) rsMicTrack.enabled = !rsMuted; // マイクは独立トラックなので enabled で即消音
   $("rsMic").textContent = rsMuted ? "🔇 ミュート中" : "🎙 マイクON";
 };
+$("rsRooms").addEventListener("input", () => { if (!rsOn) rsShowShareUrl(); });
 $("rsSource").addEventListener("change", rsSwitchSource);
 $("rsImageFile").addEventListener("change", (e) => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   const img = new Image();
-  img.onload = () => { rsImageEl = img; if (rsCanvas) rsDrawImage(); };
+  img.onload = () => {
+    rsImageEl = img;
+    rsCropRect = { x: 0, y: 0, w: 1, h: 1 };
+    rsSetupCrop();       // クロップUIを表示
+    if (rsCanvas) rsDrawImage();
+  };
   img.src = URL.createObjectURL(f);
 });
+
+// ---- 静止画クロップUI ----
+function rsSetupCrop(){
+  if (!rsImageEl) return;
+  const wrap = $("rsCropWrap"), cv = $("rsCropCanvas");
+  wrap.style.display = "";
+  // プレビュー用に元画像を最大360px幅で描画
+  const maxW = 360;
+  const scale = Math.min(1, maxW / rsImageEl.naturalWidth);
+  cv.width = Math.round(rsImageEl.naturalWidth * scale);
+  cv.height = Math.round(rsImageEl.naturalHeight * scale);
+  cv.getContext("2d").drawImage(rsImageEl, 0, 0, cv.width, cv.height);
+  // クロップ枠を全体に初期化
+  const box = $("rsCropBox");
+  box.style.left = "0px"; box.style.top = "0px";
+  box.style.width = cv.width + "px"; box.style.height = cv.height + "px";
+  rsCropRect = { x: 0, y: 0, w: 1, h: 1 };
+}
+(function(){
+  const stage = $("rsCropStage"), box = $("rsCropBox");
+  let mode = null, sx = 0, sy = 0, sb = null;
+  const cv = () => $("rsCropCanvas");
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const start = (ev) => {
+    ev.preventDefault();
+    const h = ev.target.dataset ? ev.target.dataset.h : null;
+    mode = h || "move";
+    sx = ev.clientX; sy = ev.clientY;
+    sb = { l: box.offsetLeft, t: box.offsetTop, w: box.offsetWidth, h: box.offsetHeight };
+    try { stage.setPointerCapture(ev.pointerId); } catch(e){}
+  };
+  const move = (ev) => {
+    if (!mode) return;
+    const cw = cv().width, ch = cv().height;
+    let dx = ev.clientX - sx, dy = ev.clientY - sy;
+    let l = sb.l, t = sb.t, w = sb.w, h = sb.h;
+    if (mode === "move"){ l = clamp(sb.l + dx, 0, cw - w); t = clamp(sb.t + dy, 0, ch - h); }
+    else {
+      if (mode.includes("w")){ l = clamp(sb.l + dx, 0, sb.l + sb.w - 20); w = sb.w - (l - sb.l); }
+      if (mode.includes("e")){ w = clamp(sb.w + dx, 20, cw - sb.l); }
+      if (mode.includes("n")){ t = clamp(sb.t + dy, 0, sb.t + sb.h - 20); h = sb.h - (t - sb.t); }
+      if (mode.includes("s")){ h = clamp(sb.h + dy, 20, ch - sb.t); }
+    }
+    box.style.left = l + "px"; box.style.top = t + "px";
+    box.style.width = w + "px"; box.style.height = h + "px";
+    rsCropRect = { x: l / cw, y: t / ch, w: w / cw, h: h / ch };
+  };
+  const end = () => { mode = null; };
+  stage.addEventListener("pointerdown", start);
+  stage.addEventListener("pointermove", move);
+  stage.addEventListener("pointerup", end);
+  stage.addEventListener("pointercancel", end);
+})();
+$("rsCropReset").onclick = () => {
+  rsCropRect = { x: 0, y: 0, w: 1, h: 1 };
+  rsSetupCrop();
+  rsDrawImage();
+};
 $("rsCopy").onclick = async () => {
   const u = $("rsUrl").value;
   if (!u) return;
@@ -1694,67 +2140,95 @@ $("rsCopy").onclick = async () => {
 
 
 // ================= スクロール(ホイール) =================
-// 指の移動量(px)を蓄積し、30px=1ノッチに換算して間引き送信する。
-// 正=下方向の指移動=上スクロール(コンテンツが指に追従するナチュラル方向)。
+// 指の移動量(px)を蓄積し、WHEEL_STEP px = 1ノッチに換算して間引き送信する。
+// queueWheelの正の値 = 上スクロール(WHEEL_DELTA正)。
+const WHEEL_STEP = 16;
 let wheelAcc = 0, wheelTimer = null;
 function queueWheel(px){
   wheelAcc += px;
   if (wheelTimer) return;
   wheelTimer = setTimeout(() => {
     wheelTimer = null;
-    const ticks = Math.trunc(wheelAcc / 30);
-    if (ticks !== 0){ wheelAcc -= ticks * 30; sendControl({ type: "wheel", dy: ticks }); }
-  }, 50);
+    const ticks = Math.trunc(wheelAcc / WHEEL_STEP);
+    if (ticks !== 0){ wheelAcc -= ticks * WHEEL_STEP; sendControl({ type: "wheel", dy: ticks }); }
+  }, 40);
 }
 
-// パッドの2本指スクロール。2本目が触れたら通常のポインタ操作を打ち切り、
-// 指を離しきるまでスクロール専用モードにする。
-let padPtrs = new Map(); // pointerId -> 前回のY
+// パッドの2本指スクロール。
+// タッチイベントで実装する: ポインタイベントは端末によって2本目以降の
+// move が届かない・capture と競合するなどの差異があるため、
+// e.touches に全指が必ず入るタッチイベントの方が確実に動く。
+// 2本目が触れたら通常のポインタ操作を打ち切り、全指を離すまでスクロール専用にする。
 let padTwoFinger = false;
-pad.addEventListener("pointerdown", (ev) => {
-  padPtrs.set(ev.pointerId, ev.clientY);
-  if (padPtrs.size === 2){
+let padScrollY = 0;
+function padTouchAvgY(touches){
+  let s = 0;
+  for (let i = 0; i < touches.length; i++) s += touches[i].clientY;
+  return s / touches.length;
+}
+// capture:true で attachPointer 側より先に padTwoFinger を立てる
+pad.addEventListener("touchstart", (e) => {
+  if (e.touches.length >= 2){
+    e.preventDefault();
     padTwoFinger = true;
+    padScrollY = padTouchAvgY(e.touches);
+    // 1本目で始まった通常のポインタ操作(タップ/長押し/ドラッグ準備)を打ち切る
     tpActive = false;
     clearTimeout(lpTimer); clearTimeout(dragArmTimer); clearTimeout(pendClickTimer);
     pendingClick = false;
   }
-});
-pad.addEventListener("pointermove", (ev) => {
-  if (!padTwoFinger || !padPtrs.has(ev.pointerId)) return;
-  const dy = ev.clientY - padPtrs.get(ev.pointerId);
-  padPtrs.set(ev.pointerId, ev.clientY);
-  queueWheel(dy / 2); // 2本分届くので片指相当に均す
-});
-function padPtrUp(ev){
-  padPtrs.delete(ev.pointerId);
-  if (padPtrs.size === 0) padTwoFinger = false;
+}, { passive: false, capture: true });
+pad.addEventListener("touchmove", (e) => {
+  if (!padTwoFinger) return;
+  e.preventDefault();
+  const y = padTouchAvgY(e.touches);
+  // 正=下方向の指移動=上スクロール(コンテンツが指に追従するナチュラル方向)
+  queueWheel(y - padScrollY);
+  padScrollY = y;
+}, { passive: false });
+function padTouchEnd(e){
+  if (!padTwoFinger) return;
+  if (e.touches.length === 0){
+    padTwoFinger = false; // 全指が離れたらスクロールモード終了
+  } else {
+    padScrollY = padTouchAvgY(e.touches); // 指が減ったら基準を取り直す(値の飛び防止)
+  }
 }
-pad.addEventListener("pointerup", padPtrUp);
-pad.addEventListener("pointercancel", padPtrUp);
+pad.addEventListener("touchend", padTouchEnd);
+pad.addEventListener("touchcancel", padTouchEnd);
 
 // フローティングホイール: つまみをドラッグした量をスクロールとして送る。
 // 離すとつまみは中央へ戻る(Splashtopのスクロールバー相当)。
+// setPointerCapture が効かない環境でも動くよう、押下後は window で move/up を追跡する。
 (function(){
   const wheel = $("fwheel"), thumb = $("fwThumb");
-  let active = false, lastY = 0, off = 0;
-  wheel.addEventListener("pointerdown", (ev) => {
-    ev.preventDefault(); ev.stopPropagation();
-    active = true; lastY = ev.clientY; off = 0;
-    try { wheel.setPointerCapture(ev.pointerId); } catch(e){}
-  });
-  wheel.addEventListener("pointermove", (ev) => {
-    if (!active) return;
-    ev.stopPropagation();
+  let active = false, lastY = 0, off = 0, pid = null;
+  const move = (ev) => {
+    if (!active || (pid !== null && ev.pointerId !== pid)) return;
+    ev.preventDefault();
     const dy = ev.clientY - lastY;
     lastY = ev.clientY;
     off = Math.max(-52, Math.min(52, off + dy));
     thumb.style.marginTop = (off - 17) + "px";
-    queueWheel(dy);
+    // スクロールバーの操作感: つまみを下へ = 画面を下へスクロール(=ホイールは負方向)
+    queueWheel(-dy);
+  };
+  const end = (ev) => {
+    if (!active || (pid !== null && ev.pointerId !== pid)) return;
+    active = false; pid = null;
+    thumb.style.marginTop = "-17px";
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", end);
+    window.removeEventListener("pointercancel", end);
+  };
+  wheel.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    active = true; pid = ev.pointerId; lastY = ev.clientY; off = 0;
+    try { wheel.setPointerCapture(ev.pointerId); } catch(e){}
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   });
-  const end = (ev) => { if (!active) return; active = false; thumb.style.marginTop = "-17px"; ev.stopPropagation(); };
-  wheel.addEventListener("pointerup", end);
-  wheel.addEventListener("pointercancel", end);
 })();
 
 // ================= スクリーンショット / 録画(この端末に保存) =================
@@ -1797,9 +2271,9 @@ $("recBtn").onclick = () => {
 };
 
 // ================= PC音量(メディアキー) / 画面OFF =================
-$("volUp").onclick = () => sendControl({ type: "key", key: "volup" });
-$("volDown").onclick = () => sendControl({ type: "key", key: "voldown" });
-$("volMute").onclick = () => sendControl({ type: "key", key: "volmute" });
+$("volUp").onclick = () => { sendControl({ type: "key", key: "volup" }); log("PC音量 + を送信"); };
+$("volDown").onclick = () => { sendControl({ type: "key", key: "voldown" }); log("PC音量 − を送信"); };
+$("volMute").onclick = () => { sendControl({ type: "key", key: "volmute" }); log("PC消音の切替を送信"); };
 $("monOff").onclick = () => { sendControl({ type: "power", action: "monoff" }); log("PCのモニターをオフにしました(マウス操作で復帰)"); };
 
 // ================= クリップボード同期(テキスト) =================
@@ -1825,6 +2299,23 @@ function setCursorKind(kind){
   vptr.dataset.kind = known.includes(kind) ? kind : "arrow";
 }
 setCursorKind("arrow");
+
+// ポインタの形(A=リングドット / B=矢印)。既定はB。選択はlocalStorageに保存。
+function applyPtrStyle(){
+  const v = ($("ptrStyle") && $("ptrStyle").value) || "b";
+  vptr.classList.toggle("sty-a", v === "a");
+  vptr.classList.toggle("sty-b", v === "b");
+  const svg = vptr.querySelector("svg");
+  if (svg) svg.style.display = (v === "b") ? "" : "none"; // Aのときは矢印SVGを隠す
+  localStorage.setItem("dss_ptr_style", v);
+  clampPtr(); drawPtr();
+}
+(function(){
+  const saved = localStorage.getItem("dss_ptr_style");
+  if (saved === "a" || saved === "b") $("ptrStyle").value = saved;
+  applyPtrStyle();
+})();
+$("ptrStyle").addEventListener("change", applyPtrStyle);
 
 // ================= セキュアデスクトップ検知 → 再配信の自動マスク =================
 let rsSecure = false, rsMaskStream = null, rsMaskTimer = null;
@@ -1894,6 +2385,180 @@ $("wolSend").onclick = () => {
   sendControl({ type: "wol", mac });
   log("WoLパケットの送信を指示しました: " + mac);
 };
+
+
+// ================= 再配信: 配信の安定化と参加機能 =================
+
+// Wake Lock: 再配信中の画面スリープを防ぐ。タブ復帰時に取り直す。
+let rsWakeLock = null;
+async function rsAcquireWakeLock(){
+  try {
+    if (!rsOn || !("wakeLock" in navigator)) return;
+    rsWakeLock = await navigator.wakeLock.request("screen");
+  } catch(e){ /* 非対応や省電力設定では取得できないことがある */ }
+}
+function rsReleaseWakeLock(){
+  try { if (rsWakeLock) rsWakeLock.release(); } catch(e){}
+  rsWakeLock = null;
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible"){
+    rsAcquireWakeLock();
+    // バックグラウンドで配信が止まり黒画面のまま固まることがあるため、
+    // 復帰時は選択中の映像ソース(デスクトップ/カメラ/静止画)を取り直す(修正6)
+    rsScheduleReacquire("バックグラウンド復帰");
+  }
+});
+
+// アイコンの検証(dataURLの画像のみ・サイズ上限つき)
+function rsValidIcon(v){
+  v = String(v || "");
+  return (v.startsWith("data:image/") && v.length < 20000) ? v : "";
+}
+
+// コメントのアバター要素(画像 or 頭文字入りの色付き丸)
+function rsAvatarEl(c){
+  const av = document.createElement("span");
+  av.className = "cm-av";
+  if (c.icon){
+    const img = document.createElement("img");
+    img.src = c.icon;
+    av.appendChild(img);
+  } else {
+    av.style.background = c.host ? "#ffd479" : (c.color || "#8a93a0");
+    av.textContent = (c.name || "?").slice(0, 1);
+  }
+  return av;
+}
+
+// コメント履歴(途中参加した視聴者へ welcome で再送する)
+let rsHistory = [];
+function rsPushHistory(c){
+  rsHistory.push({ name: c.name, text: c.text, color: c.color, icon: c.icon, host: !!c.host, ts: c.ts });
+  if (rsHistory.length > 50) rsHistory.shift();
+}
+function rsRelayAll(c){
+  const relay = JSON.stringify({ type: "comment", name: c.name, text: c.text, color: c.color, icon: c.icon, host: !!c.host, ts: c.ts });
+  for (const s of rsSlots){ if (s && s.dc && s.dc.readyState === "open"){ try { s.dc.send(relay); } catch(e){} } }
+}
+// 入室直後にタイトルとコメント履歴を渡す
+function rsSendWelcome(slot){
+  const ch = slot && slot.dc;
+  if (!ch || ch.readyState !== "open") return;
+  try {
+    ch.send(JSON.stringify({ type: "welcome", title: ($("rsTitle").value || "").trim(), list: rsHistory }));
+  } catch(e){}
+  rsSendAudioMap(slot);
+}
+// どの音声トラック(mid)がマイク/PC音声かを視聴側へ通知する。
+// 視聴側はこの対応表を使って2本のスライダー(動画音声/配信者マイク)にゲインを割り当てる。
+function rsSendAudioMap(slot){
+  const ch = slot && slot.dc;
+  if (!ch || ch.readyState !== "open" || !slot.pc) return;
+  const map = { type: "audiomap" };
+  try {
+    for (const tr of slot.pc.getTransceivers()){
+      const t = tr.sender && tr.sender.track;
+      if (!t || tr.mid == null) continue;
+      if (rsMicTrack && t === rsMicTrack) map.mic = tr.mid;
+      else if (rsDeskTrack && t === rsDeskTrack) map.desk = tr.mid;
+    }
+    ch.send(JSON.stringify(map));
+  } catch(e){}
+}
+
+// 配信者コメント(全視聴者へ送信・履歴にも残す)
+function bcSendComment(){
+  const text = $("bcText").value.trim().slice(0, 200);
+  if (!text) return;
+  if (!rsOn){ rsLog("再配信を開始してから送信してください"); return; }
+  const c = { name: "配信者", text, color: "#ffd479", icon: "", host: true, ts: Date.now() };
+  rsAddComment(c, 0);
+  rsPushHistory(c);
+  rsRelayAll(c);
+  $("bcText").value = "";
+}
+$("bcSend").onclick = bcSendComment;
+$("bcText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) bcSendComment(); });
+
+// タイトル・合言葉の保存/復元
+$("rsTitle").value = localStorage.getItem("dss_rs_title") || "";
+rsShowShareUrl(); // 起動時から視聴用URL/QRを表示
+$("rsPass").value = localStorage.getItem("dss_rs_pass") || "";
+$("rsTitle").addEventListener("change", () => localStorage.setItem("dss_rs_title", $("rsTitle").value));
+$("rsPass").addEventListener("change", () => localStorage.setItem("dss_rs_pass", $("rsPass").value));
+
+// 視聴URLの再生成(URLが漏れたとき用)。配信中は不可。
+$("rsRegen").onclick = () => {
+  if (rsOn){ rsLog("配信を停止してから再生成してください"); return; }
+  rsBase = rsGenBase(32);
+  localStorage.setItem("dss_rs_base", rsBase);
+  rsShowShareUrl(); // 新しいURLを即表示
+  rsLog("視聴URLを再生成しました。以前のURLは無効になります");
+};
+
+
+// ================= 再配信: PC音声トラック(マイクとは別送) =================
+// 【音質ポリシー】このプロジェクトの音声はオリジナル音質のまま処理する。
+// 加工(フィルター・ノイズ抑制・ゲイン変更等)を追加しないこと。
+// ここでのWeb Audioはトラックの取り出し(と後段のON/OFFゲイン)のみに使い、
+// 音を積極的に加工することはしない。
+// 受信中のデスクトップ音声(video.srcObjectの音声トラック)をWeb Audio経由で
+// 独立した送信トラックにする。マイクはミックスせず素のトラックのまま別送し、
+// 音量バランスは視聴側(再配信専用クライアント)の2本のスライダーで調整させる。
+// PC音声のON/OFFはゲインで即時に切り替える(再ネゴ不要)。
+function rsBuildAudioMix(){
+  rsTeardownAudioMix();
+  try {
+    rsAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+    rsAudioDest = rsAudioCtx.createMediaStreamDestination();
+    // デスクトップ音声(受信ストリームから)を接続
+    rsConnectDeskAudio();
+    rsDeskTrack = rsAudioDest.stream.getAudioTracks()[0] || null;
+    if (rsDeskTrack){ try { rsDeskTrack.contentHint = "music"; } catch(e){} }
+  } catch(e){
+    rsLog("PC音声トラックを準備できません(マイクのみで配信):", e.message || e);
+    rsDeskTrack = null;
+  }
+}
+// 受信中デスクトップ音声を送信トラックに接続(ソースがdesktopのときのみ有効)
+function rsConnectDeskAudio(){
+  if (!rsAudioCtx || !rsAudioDest) return;
+  if (rsDeskNode){ try { rsDeskNode.disconnect(); } catch(e){} rsDeskNode = null; }
+  const ms = video.srcObject;
+  const at = ms && ms.getAudioTracks && ms.getAudioTracks()[0];
+  const isDesktop = ($("rsSource").value === "desktop");
+  if (at && isDesktop){
+    try {
+      const st = new MediaStream([at]);
+      rsDeskNode = rsAudioCtx.createMediaStreamSource(st);
+      rsDeskGain = rsAudioCtx.createGain();
+      rsDeskGain.gain.value = rsDeskAudioOn ? 1 : 0;
+      rsDeskNode.connect(rsDeskGain).connect(rsAudioDest);
+    } catch(e){ /* 受信音声が無い場合など */ }
+  }
+}
+function rsTeardownAudioMix(){
+  for (const n of [rsDeskNode, rsDeskGain]){ try { n && n.disconnect(); } catch(e){} }
+  rsDeskNode = rsDeskGain = null;
+  if (rsAudioCtx){ try { rsAudioCtx.close(); } catch(e){} rsAudioCtx = null; }
+  rsAudioDest = null; rsDeskTrack = null;
+}
+function rsUpdateDeskAudioBtn(){
+  const b = $("rsDeskAudio");
+  if (!b) return;
+  b.textContent = rsDeskAudioOn ? "🔊 PC音声ON" : "🔊 PC音声OFF";
+  b.classList.toggle("rec-on", rsDeskAudioOn); // ONを目立たせる(録画中と同じ強調)
+}
+$("rsDeskAudio").onclick = () => {
+  rsDeskAudioOn = !rsDeskAudioOn;
+  localStorage.setItem("dss_rs_deskaudio", rsDeskAudioOn ? "1" : "0");
+  if (rsDeskGain) rsDeskGain.gain.value = rsDeskAudioOn ? 1 : 0;
+  rsUpdateDeskAudioBtn();
+  if (rsDeskAudioOn && !rsDeskGain && $("rsSource").value === "desktop"){ rsConnectDeskAudio(); }
+  rsLog(rsDeskAudioOn ? "PC音声を配信に含めます" : "PC音声を配信から外します");
+};
+rsUpdateDeskAudioBtn();
 
 </script>
 </body>
