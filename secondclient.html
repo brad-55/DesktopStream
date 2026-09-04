@@ -50,6 +50,15 @@
     background: #000; border-radius: 8px; overflow: hidden;
   }
   video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+  /* 状態を示す小さな札(トグル表示)。操作クライアント2種と同じ作り。
+     色だけに頼らず ON / OFF の文字を必ず入れる。 */
+  .sw {
+    display: inline-block; margin-left: 4px; padding: 0 5px;
+    border-radius: 999px; font-size: 10px; font-weight: 700;
+    line-height: 15px; vertical-align: 1px;
+    background: #48484a; color: #f5f5f7;
+  }
+  .sw.on { background: #30d158; color: #06240f; }
   #unmute {
     flex: none;
     padding: 6px 10px; min-height: 34px; font: inherit; font-size: 12px; color: #e6e8ea;
@@ -248,7 +257,7 @@
     <div id="netWarn" style="display:none"></div>
     <div id="vrow">
       <span class="volgrp"><span class="vlabel">🎬動画</span><input id="volDesk" type="range" min="0" max="100" value="30" aria-label="動画音声の音量" /></span>
-      <button id="unmute">🔇 音声ON</button>
+      <button id="unmute" aria-pressed="false">🔇 音声<span class="sw">OFF</span></button>
       <span class="volgrp"><span class="vlabel">🎙配信者マイク</span><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
       <button id="fsBtn" aria-label="全画面表示">⛶ 全画面</button>
     </div>
@@ -275,7 +284,7 @@ const $ = (id) => document.getElementById(id);
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.0";
+const CLIENT_VERSION = "v0.7.1";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -825,8 +834,17 @@ $("unmute").onclick = () => {
     video.muted = true;
   }
   applyAudioGains();
-  $("unmute").textContent = masterMuted ? "🔇 音声ON" : "🔊 音声OFF";
+  setViewMuteLabel();
 };
+// 表示は「押すとどうなるか」ではなく**いまどうなっているか**で統一する。
+// 操作クライアント2種と同じ直し方(絵柄が状態、文言が動作を指していて逆を向いていた)。
+function setViewMuteLabel(){
+  const on = !masterMuted;
+  const b = $("unmute");
+  b.innerHTML = (on ? "🔊" : "🔇") + ' 音声<span class="sw' + (on ? " on" : "") + '">' +
+                (on ? "ON" : "OFF") + '</span>';
+  b.setAttribute("aria-pressed", on ? "true" : "false");
+}
 $("retry").onclick = () => { $("retry").classList.remove("on"); retryCount = 0; scan(); };
 
 // ---- 全画面 ----
