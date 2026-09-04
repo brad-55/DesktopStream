@@ -172,6 +172,34 @@
   }
   #zoomReset { position: absolute; top: 8px; left: 8px; z-index: 6; display: none; }
   #zoomReset.on { display: block; }
+  /* 【全画面のときは安全領域の内側へ寄せる】
+     ホーム画面から起動したPWAでは上部にブラウザのバーが無く、
+     擬似全画面は画面の端から端まで広がる。既定の top:8px のままだと
+     映像上のボタンが **Dynamic Island の裏に入って押せなくなる**
+     (iPhone 16 で実測)。横向きでは島が左右のどちらかに来るため、
+     左右の inset も見る。通常表示は #app の padding が島を避けているので、
+     この手当ては全画面のときだけでよい。
+     【規則を分けてある】セレクタリストは1つでも解釈できないものが混ざると
+     規則ごと捨てられる。:fullscreen を知らない環境で擬似全画面の指定まで
+     失わないよう、3つを別々に書く。 */
+  .stage:fullscreen .stage-ov {
+    top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right));
+  }
+  .stage:-webkit-full-screen .stage-ov {
+    top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right));
+  }
+  .stage.fs-css .stage-ov {
+    top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right));
+  }
+  .stage:fullscreen #zoomReset {
+    top: calc(8px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left));
+  }
+  .stage:-webkit-full-screen #zoomReset {
+    top: calc(8px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left));
+  }
+  .stage.fs-css #zoomReset {
+    top: calc(8px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left));
+  }
 
   /* 仮想ポインタ。--pc が状態色 */
   #vptr { position: absolute; left: 50%; top: 50%; pointer-events: none; display: none; z-index: 5; --pc: var(--tint); }
@@ -4534,7 +4562,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.5";
+const CLIENT_VERSION = "v0.7.6";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
