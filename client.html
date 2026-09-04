@@ -3,101 +3,184 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='%232ecf8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E %3Crect x='2' y='3' width='20' height='14' rx='2'/%3E %3Cpath d='M12 17v3M8 20h8'/%3E %3Cpath d='M4 4l7.07 17 2.51-7.39L21 11.06z' fill='%232ecf8e' stroke='none' transform='translate(6.8 3.8) scale(0.5)'/%3E %3C/svg%3E" />
 <title>Desktop Stream — Test Client</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: #0d0f12; color: #e6e8ea;
-    font: 14px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
-  }
-  header {
-    display: flex; align-items: center; gap: 10px; flex: none;
-    padding: 8px 14px;
-    padding-left: calc(14px + env(safe-area-inset-left));
-    padding-right: calc(14px + env(safe-area-inset-right));
-    padding-top: calc(8px + env(safe-area-inset-top));
-    border-bottom: 1px solid #1e242b; background: #11151a;
-  }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; flex: none; }
-  .dot.on { background: #36d399; box-shadow: 0 0 8px #36d39988; }
-  .dot.warn { background: #fbbd23; }
-  h1 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .04em; }
-  #state { margin-left: auto; color: #7c8693; font-size: 12px; }
 
-  /* レイアウト: 画面の向きで配置を切り替えるグリッド */
+<!-- ホーム画面に置いてアプリとして起動するための指定(PWA)。
+     Service Worker は**入れていない**。サーバーが無ければ何もできないアプリなので
+     オフラインキャッシュに価値が無く、LAN版では自己署名証明書のため登録もできない。
+     manifest とメタタグだけで、ホーム画面からの全画面起動は成立する。 -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#000000" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="DesktopStream" />
+<!-- black-translucent にすると画面上端まで描画が伸びる。
+     ヘッダは env(safe-area-inset-top) を見ているのでノッチと重ならない。 -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="apple-touch-icon" href="icon_256.png" />
+<style>
+  /* ============================================================
+     DesktopStream 操作クライアント — UI 刷新版 (2026-08-30)
+
+     準拠: apple-design (HIG + Liquid Glass) / mobile-app-ui-design
+     仕様: docs/project/ui-redesign/spec.md
+
+     旧デザインは classic.html に退避してある。?ui=classic で戻せる。
+
+     【重要】映像(.stage)に重なる要素に backdrop-filter を使わないこと。
+     毎フレーム再合成される映像面の上でのガラスは、デコードと合成予算を奪う。
+     ガラスはヘッダとタブバー(静止したパネルの上に浮かぶもの)に限定する。
+     ============================================================ */
+
+  :root {
+    color-scheme: dark;
+
+    /* 字面。UIはシステムフォント、等幅は「機械が生成した値」だけに使う */
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans",
+            "Yu Gothic UI", "Noto Sans JP", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    /* 背景3段 + 前景(純白は使わない) */
+    --bg: #000;
+    --bg-2: #1c1c1e;
+    --bg-3: #2c2c2e;
+    --label: #f5f5f7;
+    --label-2: rgba(235,235,245,.60);
+    --label-3: rgba(235,235,245,.30); /* 装飾専用。読ませる文字に使うと4.5:1を割る(実測2.3〜2.5) */
+    --separator: rgba(84,84,88,.60);
+
+    /* tint は「操作できる」ことの印。静的な装飾には絶対に着けない */
+    --tint: #30d158;
+    --red: #ff4245;
+    --orange: #ff9230;
+    --blue: #0091ff;
+    --pink: #ff375f;
+
+    --r-cell: 10px;
+    --r-card: 14px;
+    --r-pill: 999px;
+
+    --ease: cubic-bezier(.28,.11,.32,1);
+    --press-in: 40ms;   /* 押し込みは速く */
+    --press-out: 140ms; /* 戻りはゆっくり */
+
+    /* 型の目盛り。実際に使うのは3種類だけ(spec 8節)。
+       階層はサイズだけで作らず、ウェイト(400/600)と不透明度(--label / -2 / -3)を併用する。
+       入力欄の16pxは装飾ではなく機能要件(16px未満だとiOSがフォーカス時にズームする)。 */
+    --fs-input: 1rem;      /* 16px 入力欄のみ */
+    --fs-sub:   .9375rem;  /* 15px 見出し・強調値 */
+    --fs-body:  .75rem;    /* 12px 本文・ラベル(既定) */
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--label);
+    font-family: var(--font);
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    height: 100vh; height: 100dvh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ---------- ヘッダ ---------- */
+  /* ヘッダは通常フローから外して**浮かせる**。コンテンツはこの下を流れる。
+     こうしないと背後に何も無く、backdrop-filter が黒い背景をぼかすだけの
+     見た目に効かない処理になる(監査 Major-1)。 */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+    display: flex; align-items: center; gap: 8px;
+    /* 上下の余白は詰める。中身は再接続ボタン(32px)が決めているので、
+       これ以上薄くするならボタンの厚みを変えることになる(それはしない)。 */
+    padding: 5px 16px;
+    padding-left: calc(16px + env(safe-area-inset-left));
+    padding-right: calc(16px + env(safe-area-inset-right));
+    padding-top: calc(5px + env(safe-area-inset-top));
+    background: rgba(30,30,32,.62);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+  }
+  header h1 {
+    margin: 0; font-size: var(--fs-sub); font-weight: 600;
+    letter-spacing: -.01em; color: var(--label);
+  }
+  #state {
+    margin-left: auto; font-size: var(--fs-body); color: var(--label-2);
+    font-family: var(--mono);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--label-3); flex: none; }
+  .dot.on, .dot.ok { background: var(--tint); }
+  .dot.warn { background: var(--orange); }
+  .dot.err  { background: var(--red); }
+
+  /* ---------- レイアウト ---------- */
+  /* ヘッダとタブバーが fixed になったぶん、上下に安全余白を取る。
+     背景は端まで伸ばし、コンテンツだけをバーの内側に収める(apple-design)。
+     --bar-top / --bar-bottom は実測ではなく、各バーの想定高さ。 */
   #app {
-    flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px;
-    padding: 10px;
-    padding-left: calc(10px + env(safe-area-inset-left));
-    padding-right: calc(10px + env(safe-area-inset-right));
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px;
+    padding: 12px;
+    padding-left: calc(12px + env(safe-area-inset-left));
+    padding-right: calc(12px + env(safe-area-inset-right));
+    padding-top: calc(47px + env(safe-area-inset-top)); /* ヘッダ42px + 余白5px */
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
-  /* 縦向き: プレーヤーは固定サイズ、rightcolが残り高さを占めてタブ内でスクロール */
   #rightcol { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-  /* タブバー */
-  #tabbar {
-    display: flex; gap: 5px; background: #0f1419; border: 1px solid #1e242b;
-    border-radius: 8px; padding: 3px; flex: none;
-  }
-  .tab-btn {
-    flex: 1; padding: 8px; min-height: 40px; border-radius: 6px; border: none; background: transparent;
-    color: #9aa4b0; font-size: 12px; font-weight: 600; cursor: pointer; text-align: center;
-    touch-action: manipulation;
-  }
-  .tab-btn.active { background: #1c3a2e; color: #dff3e8; }
-  /* タブ本体: 残り高さを使い、はみ出したらスクロール */
-  .tabpage { flex: 1; min-height: 0; display: none; flex-direction: column; gap: 10px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-  .tabpage.active { display: flex; }
-  /* 横向き: プレーヤーを左、タブ類を右に並べて高さを稼ぐ。
-     min-width を併用し、縦持ちでOSキーボードが開いて高さ<幅になった際の
-     「見かけ上のlandscape化」でレイアウトが飛ぶのを防ぐ */
-  @media (orientation: landscape) and (min-width: 600px) {
-    #app {
-      flex-direction: row; flex-wrap: nowrap;
-    }
-    .stage { flex: 0 1 auto; height: 100%; max-height: 100%; width: auto; max-width: 58%; }
-    #rightcol { flex: 1 1 320px; min-width: 280px; }
-  }
-  /* 縦持ち・狭い画面: タブバーを下部に配置して親指で届きやすく。
-     プレーヤー高さは画面の42%までに抑える。キーボード表示時は
-     interactive-widget=resizes-content により dvh が縮むため、
-     プレーヤーが自動で小さくなり、文字入力欄とともに画面内に収まる */
-  @media (orientation: portrait), (max-width: 599px) {
-    #tabbar { order: 9; }
-    .stage { max-height: 42dvh; }
-  }
+
+  /* ---------- 映像 ---------- */
   .stage {
-    position: relative; background: #000; border: 1px solid #1e242b;
-    border-radius: 8px; overflow: hidden; aspect-ratio: 16/9; width: 100%; align-self: start; flex: 0 0 auto;
+    position: relative; background: #000;
+    border-radius: var(--r-card); overflow: hidden;
+    aspect-ratio: 16/9; width: 100%; align-self: start; flex: 0 0 auto;
+    /* 背景も映像も黒のため、境界が無いと「どこが映像か」が分からない。
+       影は黒地では見えないので、髪の毛一本の境界線で面を示す。 */
+    border: .5px solid var(--separator);
   }
   video { width: 100%; height: 100%; display: block; background: #000; touch-action: none; }
+  #zoomLayer { position: absolute; inset: 0; transform-origin: 0 0; }
+  #zoomLayer video { width: 100%; height: 100%; }
+
+  /* 映像の上のUI: 不透明。ガラスは使わない(冒頭の注意を参照) */
   .cap-msg {
     position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
-    background: rgba(0,0,0,.62); color: #fff; font-size: 13px;
-    padding: 6px 14px; border-radius: 14px; z-index: 6; pointer-events: none;
-    backdrop-filter: blur(2px); white-space: nowrap;
+    background: rgba(0,0,0,.78); color: var(--label);
+    font-size: var(--fs-body); padding: 6px 14px; border-radius: var(--r-pill);
+    z-index: 6; pointer-events: none; white-space: nowrap;
   }
   .hint {
     position: absolute; inset: 0; display: grid; place-items: center;
-    color: #5b6573; font-size: 13px; pointer-events: none;
+    color: var(--label-2); font-size: var(--fs-sub); pointer-events: none;
   }
-  /* 仮想ポインタ: 見やすい二重リング */
-  #zoomLayer { position:absolute; inset:0; transform-origin:0 0; }
-  #zoomLayer video { width:100%; height:100%; }
-  /* 仮想ポインタ。--pc(状態色)をA/B共通で使う。既定は緑=通常。 */
-  #vptr {
-    position: absolute; left: 50%; top: 50%;
-    pointer-events: none; display: none; z-index: 5;
-    --pc: #36d399;
+  .stage-ov { position: absolute; top: 8px; right: 8px; z-index: 6; display: none; gap: 6px; }
+  /* 全画面のときだけ出す。**擬似全画面(.fs-css)にも同じ規則が要る** —
+     これを書き忘れて、iOSでは全画面にしてもボタンが出なかった。
+     `:fullscreen` を使う規則を足したら、必ず .fs-css 側も足すこと(AC27で検査)。 */
+  /* 【規則を分けてある】セレクタリストは1つでも解釈できないものが混ざると
+     **規則ごと捨てられる**。`:fullscreen` を知らない環境で
+     擬似全画面(.fs-css)の指定まで失うのを避けるため、別々に書く。 */
+  .stage:fullscreen .stage-ov { display: flex; }
+  .stage:-webkit-full-screen .stage-ov { display: flex; }
+  .stage.fs-css .stage-ov { display: flex; }
+  .stage-ov button, #zoomReset {
+    min-height: 44px; padding: 6px 12px; font-size: var(--fs-body);
+    background: rgba(28,28,30,.86); border: .5px solid rgba(255,255,255,.14);
+    border-radius: var(--r-cell); color: var(--label);
   }
-  #vptr.on { display: block; }
-  #vptr.click { --pc: #fbbd23; }
-  #vptr.right { --pc: #60a5fa; }
-  #vptr.drag  { --pc: #f472b6; }
+  #zoomReset { position: absolute; top: 8px; left: 8px; z-index: 6; display: none; }
+  #zoomReset.on { display: block; }
 
-  /* A: リングドット(基準点=中心)。子要素は使わず擬似要素で描く */
+  /* 仮想ポインタ。--pc が状態色 */
+  #vptr { position: absolute; left: 50%; top: 50%; pointer-events: none; display: none; z-index: 5; --pc: var(--tint); }
+  #vptr.on { display: block; }
+  #vptr.click { --pc: var(--orange); }
+  #vptr.right { --pc: var(--blue); }
+  #vptr.drag  { --pc: var(--pink); }
+
+  /* A: リングドット */
   #vptr.sty-a {
     width: 14px; height: 14px; margin: -7px 0 0 -7px;
     border: 2px solid var(--pc); border-radius: 50%;
@@ -106,242 +189,573 @@
     transition: transform .04s linear;
   }
   #vptr.sty-a::after {
+    /* 中央のドット。センタリングは transform だけに任せ margin は 0
+       (margin と併用すると二重に半分ずれて左上へ寄る) */
     content: ""; position: absolute; left: 50%; top: 50%;
-    width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
+    width: 3px; height: 3px; margin: 0; transform: translate(-50%,-50%);
     background: #eafff6; border-radius: 50%; box-shadow: 0 0 3px rgba(0,0,0,.8);
   }
   #vptr.sty-a.click { transform: scale(.6); }
   #vptr.sty-a.drag { background: color-mix(in srgb, var(--pc) 30%, transparent); }
-
-  /* B: 実カーソル型 矢印(基準点=先端=左上頂点)。SVGのfillを状態色に追従させる */
-  #vptr.sty-b { width: 0; height: 0; }
-  #vptr.sty-b svg { position: absolute; left: 0; top: 0; overflow: visible; }
-  #vptr.sty-b svg path { fill: var(--pc); stroke: #0d1116; stroke-width: 1.5; stroke-linejoin: round; }
-  #vptr.sty-b.click { transform: scale(.85); }
-
-  .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  /* 主操作: ボタンを少し大きく、押しやすく */
-  .primary-controls button {
-    padding: 8px 12px; font-size: 13px;
+  /* B: 矢印 */
+  #vptr.sty-b { width: 22px; height: 30px; margin: -2px 0 0 -2px; }
+  #vptr.sty-b svg { display: block; width: 22px; height: 30px; }
+  #vptr.sty-b svg path {
+    fill: var(--pc); stroke: rgba(0,0,0,.75); stroke-width: 1.5; stroke-linejoin: round;
   }
-  .primary-controls { gap: 6px; }
-  /* 状態ガイド: 今すべきことを1行で示す */
+  #vptr.sty-b.click svg { transform: scale(.85); transform-origin: 1px 1px; }
+
+  /* フローティングホイール。
+     【重要】background の一括指定に !important を付けてはいけない。
+     一括指定は background-position を含むため、JSが動かす回転表現を打ち消す。 */
+  #fwheel {
+    /* 【重要】display:none を付けてはいけない。
+       JSはこの要素に .on を付けないし display も触らない(ドラッグ量を拾うだけ)。
+       隠すとスクロールダイヤルが恒久的に出なくなる(実際に一度そうした)。
+       表示の制御を持つのは #zoomReset の方で、あちらはJSが .on を付け外しする。 */
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    z-index: 6; overflow: hidden;
+    /* 配色はクリア8割・緑2割。映像の上に置く部品なので、黒で覆わず映像を透かす。
+       ここは .stage の中なので backdrop-filter は使えない(AC8)。アルファだけで作る。
+       色は var(--tint) ではなく実値で書く。透明度を混ぜるには color-mix が要り、
+       iOS 16.2未満で宣言ごと落ちるため(#pad と同じ理由)。 */
+    background-image:
+      repeating-linear-gradient(to bottom,
+        rgba(255,255,255,.30) 0 2px, rgba(255,255,255,.04) 2px 4px, rgba(48,209,88,.10) 4px 9px),
+      linear-gradient(to right,
+        rgba(48,209,88,.07) 0%, rgba(255,255,255,.08) 38%,
+        rgba(255,255,255,.13) 50%, rgba(255,255,255,.06) 62%, rgba(48,209,88,.07) 100%);
+    background-color: rgba(48,209,88,.10);
+    background-repeat: repeat, no-repeat;
+    height: 96px; width: 26px; border-radius: 13px;
+    border: .5px solid rgba(48,209,88,.40);
+    box-shadow: inset 0 0 6px rgba(255,255,255,.10), 0 2px 8px rgba(0,0,0,.18);
+  }
+  #fwheel::before, #fwheel::after {
+    content: ""; position: absolute; left: 0; right: 0; height: 10px; pointer-events: none; z-index: 1;
+  }
+  /* 上下の端をぼかして円柱が奥へ回り込んで見えるようにする。黒ではなく暗い緑で陰を作る */
+  #fwheel::before { top: 0; background: linear-gradient(to bottom, rgba(6,40,20,.24), transparent); }
+  #fwheel::after { bottom: 0; background: linear-gradient(to top, rgba(6,40,20,.24), transparent); }
+  #fwThumb { display: none; }
+
+  /* ---------- 状態ガイド ---------- */
   #guide {
-    font-size: 12.5px; color: #9aa4b0; padding: 7px 11px; border-radius: 7px;
-    background: #0f1419; border: 1px solid #1e242b; border-left: 3px solid #2f6b4f;
+    flex: none; padding: 10px 14px; border-radius: var(--r-cell);
+    background: var(--bg-2); color: var(--label-2);
+    font-size: var(--fs-body); border: .5px solid var(--separator);
   }
-  #guide.warn { border-left-color: #b5892f; color: #d8c48a; }
-  #guide.err  { border-left-color: #a33; color: #e0a0a0; }
-  #guide.ok   { border-left-color: #2f6b4f; color: #9fd8b8; }
-
-  /* 設定タブ: 各項目を縦に積む。スマホで指が届きやすい大きめUI */
-  .settings-list { display: flex; flex-direction: column; gap: 14px; }
-  .setting-card {
-    background: #0f1419; border: 1px solid #1e242b; border-radius: 10px; padding: 12px 14px;
-    display: flex; flex-direction: column; gap: 8px;
+  /* 状態表示と Start/Stop を1行に。左半分が状態、右半分が操作。
+     ここで横幅を分け合うことで、下のボタン行が4個ずつになり、
+     どの行も完全な文言のまま1行に収まるようになる。
+     【注意】薄くするのは**この行の余白だけ**。ボタンの厚み(32px)は変えない。 */
+  #statusrow { display: flex; gap: 6px; align-items: stretch; }
+  #statusrow #guide {
+    flex: 1 1 0; min-width: 0; padding: 4px 10px;
+    display: flex; align-items: center;
   }
-  .setting-card > .sc-label { color: #b6c0cc; font-size: 13px; font-weight: 600; }
-  .setting-card > .sc-desc { color: #6f7a86; font-size: 11px; margin-top: -4px; }
-  .setting-card .sc-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .fld { display: flex; flex-direction: column; gap: 4px; }
-  .fld-inline { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 45%; min-width: 150px; }
-  .fld-inline select { flex: 1; width: auto; min-width: 0; max-width: none; }
-  .in-unit { display: inline-flex; align-items: center; gap: 6px; }
-  .unit { color: #6f7a86; font-size: 12px; }
-  #roomState { font-size: 12px; color: #9aa4b0; }
+  #statusrow #startstop { flex: 1 1 0; gap: 6px; }
+  #statusrow #startstop button {
+    flex: 1 0 auto; min-height: 32px; padding: 4px 5px;
+    max-width: calc(50% - 3px); /* 2個で行をちょうど二分する */
+  }
 
-  .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  /* ---------- タブバー(下部に浮かぶカプセル) ---------- */
+  #tabbar {
+    display: flex; gap: 4px; padding: 4px; flex: none;
+    border-radius: var(--r-pill);
+    background: rgba(30,30,32,.62);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    box-shadow:
+      0 8px 32px rgba(0,0,0,.38),
+      inset 0 1px 0 rgba(255,255,255,.10),
+      inset 0 0 0 .5px rgba(255,255,255,.08);
+  }
+  .tab-btn {
+    flex: 1; min-height: 44px; padding: 8px 6px;
+    border: none; background: transparent; color: var(--label-2);
+    font: inherit; font-size: var(--fs-body); font-weight: 600;
+    border-radius: var(--r-pill); cursor: pointer; touch-action: manipulation;
+  }
+  .tab-btn.active { background: var(--bg-3); color: var(--tint); }
+
+  /* ---------- タブ本体 ---------- */
+  .tabpage {
+    flex: 1; min-height: 0; display: none; flex-direction: column; gap: 10px;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .tabpage.active { display: flex; }
+
+  /* ---------- ボタン ----------
+     押下は 40ms で入り 140ms で戻る。リップルは使わない。 */
   button {
-    appearance: none; border: 1px solid #2a323b; background: #161b21; color: #e6e8ea;
-    padding: 7px 10px; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer;
-    min-height: 38px; touch-action: manipulation;
+    appearance: none; border: .5px solid var(--separator);
+    background: var(--bg-2); color: var(--label);
+    font: inherit; font-size: var(--fs-body); font-weight: 600;
+    padding: 8px 14px; min-height: 44px; border-radius: var(--r-cell);
+    cursor: pointer; touch-action: manipulation;
+    transition: transform var(--press-out) var(--ease),
+                opacity var(--press-out) var(--ease),
+                background var(--press-out) var(--ease);
   }
-  button:hover:not(:disabled) { background: #1d242c; border-color: #3a4450; }
-  button:active:not(:disabled) { background: #232c36; border-color: #3a4450; }
-  button:disabled { opacity: .4; cursor: not-allowed; }
-  button.primary { background: #1c3a2e; border-color: #2f6b4f; }
-  button.danger  { background: #3a1c1f; border-color: #6b2f34; }
-  label { color: #9aa4b0; font-size: 12px; }
-  input[type=number] {
-    width: 88px; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
-    padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px; /* 16px未満はiOSでフォーカス時に画面がズームされる */
+  button:active:not(:disabled) {
+    transform: scale(.97); opacity: .8;
+    transition-duration: var(--press-in);
   }
-  .toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; min-height: 36px; }
-  .toggle input[type=checkbox] { width: 20px; height: 20px; }
-  select {
-    background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
-    padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px; width: 100%; max-width: 240px;
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  /* tint が付くのは「いま押すべき1つ」だけ */
+  button.primary { background: var(--tint); color: #04140a; border-color: transparent; }
+  button.danger  { background: transparent; color: var(--red); border-color: var(--separator); }
+  .hdr-btn { min-height: 32px; padding: 5px 12px; border-radius: var(--r-pill); }
+
+  /* ---------- 入力 ---------- */
+  input[type=text], input[type=number], input[type=file], select, textarea {
+    background: var(--bg-2); border: .5px solid var(--separator); color: var(--label);
+    font: inherit; font-size: var(--fs-input); /* 16px未満だとiOSがフォーカス時にズームする */
+    padding: 9px 12px; border-radius: var(--r-cell); min-height: 44px;
   }
-  /* ヘッダーの再接続ボタン */
-  .hdr-btn { padding: 5px 10px; font-size: 11px; flex: none; min-height: 32px; }
-  header h1 { margin-right: auto; }
-  #stats { font-size: 12px; color: #7cb59c; padding: 6px 8px; background: #0a0d10;
-    border: 1px solid #1e242b; border-radius: 6px; white-space: pre-wrap; word-break: break-all; }
-  #log {
-    min-height: 0; max-height: 120px; overflow: auto; padding: 8px 10px;
-    background: #0a0d10; border: 1px solid #1e242b; border-radius: 6px;
-    font-size: 12px; color: #8b95a1; white-space: pre-wrap; line-height: 1.5;
+  /* input[type=file] は「ネイティブのボタン + ファイル名」を内包し、内容幅が縮まない。
+     上の 16px は**テキスト入力のiOSズーム回避**が目的で、ファイル入力には要らない
+     (文字を打てないのでズームしない)。16pxのままだとファイル名が大きく描画され、
+     iPhone実機で設定タブに横スクロールが出た。本文サイズへ落として親の中に収める。
+     【重要】このルールは上の一括指定より**後**に置くこと。詳細度が同じなので、
+     前に置くと font-size が 16px に上書きされる(実際に一度そうなった)。
+     【注意】Chrome の iOS エミュレーションは WebKit のフォーム部品を再現しないため、
+     この症状はエミュレーションでは2px程度しか出ず、実機でしか判らなかった。 */
+  input[type=file] {
+    width: 100%; max-width: 100%; min-width: 0;
+    font-size: var(--fs-body); padding: 8px 10px;
   }
-  /* 操作用トラックパッド領域: 操作タブ内で残り高さを埋める */
+  select { max-width: 260px; width: 100%; }
+  input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--tint); }
+  label { color: var(--label-2); font-size: var(--fs-body); }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-size: var(--fs-body); }
+  .in-unit { display: inline-flex; align-items: center; gap: 6px; }
+  .unit { color: var(--label-2); font-size: var(--fs-body); }
+  .fld { display: flex; flex-direction: column; gap: 6px; }
+  .fld-inline { display: inline-flex; align-items: center; gap: 8px; }
+  .fld-inline label { white-space: nowrap; } /* 「画面」が「画/面」と縦に折れるのを防ぐ */
+  .hintline { font-size: var(--fs-body); color: var(--label-2); }
+  #wolMac { flex: 1; min-width: 200px; }
+
+  /* ---------- 操作行 ---------- */
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .primary-controls { gap: 8px; }
+
+  /* ---------- カード(設定の一覧) ---------- */
+  .settings-list { display: flex; flex-direction: column; gap: 10px; }
+  .setting-card {
+    display: flex; flex-direction: column; gap: 8px;
+    background: var(--bg-2); border-radius: var(--r-card);
+    padding: 14px; border: .5px solid var(--separator);
+  }
+  .sc-label { font-size: var(--fs-sub); font-weight: 600; color: var(--label); }
+  .sc-desc  { font-size: var(--fs-body); color: var(--label-2); margin-top: -4px; }
+  .sc-row   { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+  /* ---------- 統計・ログ(等幅を使う場所) ---------- */
+  #stats, #log {
+    font-family: var(--mono); font-size: var(--fs-body); line-height: 1.55;
+    background: var(--bg); border: .5px solid var(--separator);
+    border-radius: var(--r-cell); padding: 10px 12px;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  #stats { color: var(--tint); }
+  #log { color: var(--label-2); max-height: 160px; overflow: auto; min-height: 0; }
+  #roomState { font-size: var(--fs-body); color: var(--label-2); font-family: var(--mono); }
+
+  /* ---------- 文字入力パネル ---------- */
+  #kbd {
+    background: var(--bg-2); border: .5px solid var(--separator);
+    border-radius: var(--r-card); padding: 12px;
+    display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto;
+  }
+  .kbdrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #kbdText { flex: 1; min-width: 140px; }
+  .keys button { padding: 6px 10px; }
+
+  /* ---------- トラックパッド ---------- */
   #pad {
-    flex: 1; min-height: 160px; border-radius: 10px;
-    border: 1px dashed #2f6b4f; background: #0f1714;
+    flex: 1; min-height: 160px; border-radius: var(--r-card);
+    /* color-mix() は iOS 16.2 未満で未対応。宣言ごと捨てられると
+       トラックパッド領域が枠も背景も無くなって見えなくなるため、素の値を先に置く。
+       (旧デザインはここを素の16進数で書いていた。新設した依存なので退行させない) */
+    border: 1px dashed rgba(48,209,88,.45);
+    border: 1px dashed color-mix(in srgb, var(--tint) 45%, transparent);
+    background: #1d2722;
+    background: color-mix(in srgb, var(--tint) 6%, var(--bg-2));
     display: flex; align-items: center; justify-content: center;
-    text-align: center; padding: 12px; touch-action: none; user-select: none;
+    text-align: center; padding: 16px; touch-action: none; user-select: none;
   }
-  #padHint { color: #5e7a6c; font-size: 12px; pointer-events: none; }
-  /* iOS: パッド上の長押しでテキスト選択・メニューが出るのを防止 */
-  #pad, #pad * , .stage, .stage * {
+  #padHint { color: var(--label-2); font-size: var(--fs-body); pointer-events: none; }
+  /* iOS: パッドと映像の長押しでテキスト選択・メニューが出るのを防ぐ */
+  #pad, #pad *, .stage, .stage * {
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
   }
-  /* 文字入力パネル: 操作タブ内に常設 */
-  #kbd {
-    background: #11151a; border: 1px solid #2a323b; border-radius: 10px;
-    padding: 10px; display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto;
+
+  /* ---------- 再配信 ---------- */
+  #rsPreview { width: 160px; border-radius: var(--r-cell); background: #000; display: block; }
+  #rsUrl { flex: 1; min-width: 160px; font-family: var(--mono); }
+  #rsTitle, #rsPass, #bcText { flex: 1; min-width: 140px; }
+  #rsQr { margin-top: 8px; background: #fff; padding: 8px; border-radius: var(--r-cell); width: fit-content; }
+  #rsQr:empty { display: none; padding: 0; margin: 0; }
+  #rsCropStage { position: relative; display: inline-block; max-width: 100%; }
+  #rsCropCanvas { display: block; max-width: 100%; border-radius: var(--r-cell); }
+  #rsCropBox { position: absolute; border: 2px solid var(--tint); box-shadow: 0 0 0 9999px rgba(0,0,0,.5); cursor: move; }
+  .rh { position: absolute; width: 14px; height: 14px; background: var(--tint); border-radius: 50%; }
+  .rh[data-h="nw"] { left: -7px; top: -7px; cursor: nwse-resize; }
+  .rh[data-h="ne"] { right: -7px; top: -7px; cursor: nesw-resize; }
+  .rh[data-h="sw"] { left: -7px; bottom: -7px; cursor: nesw-resize; }
+  .rh[data-h="se"] { right: -7px; bottom: -7px; cursor: nwse-resize; }
+  #rsViewers { display: flex; flex-wrap: wrap; gap: 6px; }
+  .rs-viewer {
+    font-size: var(--fs-body); padding: 4px 10px; border-radius: var(--r-pill);
+    background: var(--bg-3); color: var(--label-2);
   }
-  .kbdrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  #kbdText { flex: 1; min-width: 120px; background: #0d1116; border: 1px solid #2a323b;
-    color: #e6e8ea; padding: 8px; border-radius: 6px; font: inherit; font-size: 16px; }
-  .keys button { padding: 6px 8px; font-size: 12px; }
-  /* 全画面時: .stage(映像+ポインタ)を画面いっぱいに、映像はcontainで黒帯 */
-  .stage:fullscreen { width: 100vw; height: 100dvh; aspect-ratio: auto; border: none; border-radius: 0; }
+  .rs-viewer.rs-cur { background: #2f4a38; color: var(--label); } /* color-mix 未対応環境向け */
+  .rs-viewer.rs-cur { background: color-mix(in srgb, var(--tint) 22%, var(--bg-3)); }
+  #rsRoster, #rsComments {
+    background: var(--bg); border: .5px solid var(--separator);
+    border-radius: var(--r-cell); padding: 10px 12px;
+    max-height: 220px; overflow: auto; font-size: var(--fs-body);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .rs-roster-row { color: var(--label-2); }
+  .rs-roster-row.left { opacity: .55; } /* 退室済み */
+  .rs-comment { line-height: 1.55; word-break: break-word; }
+  .rs-cmeta { color: var(--label-3); font-size: var(--fs-body); margin-right: 6px; }
+  .rs-sys { color: var(--label-3); font-style: italic; }
+  .cm-host { color: var(--orange) !important; font-weight: 600; }
+  .cm-av {
+    width: 20px; height: 20px; border-radius: 50%; flex: none; overflow: hidden;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: var(--fs-body); font-weight: 600; color: #04140a;
+    vertical-align: middle; border: none; padding: 0; min-height: 0;
+  }
+  .cm-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .rec-on { color: var(--red) !important; }
+
+  /* ---------- 全画面 ---------- */
+  .stage:fullscreen { width: 100vw; height: 100dvh; aspect-ratio: auto; border-radius: 0; }
   .stage:fullscreen video { width: 100%; height: 100%; object-fit: contain; }
-  .stage:-webkit-full-screen { width: 100vw; height: 100dvh; border: none; }
+  .stage:-webkit-full-screen { width: 100vw; height: 100dvh; border-radius: 0; }
   .stage:-webkit-full-screen video { width: 100%; height: 100%; object-fit: contain; }
-  /* ルームID入力モーダル */
+  /* 全画面APIを持たない環境(iPhoneのSafari)向けの擬似全画面。
+     div に対する requestFullscreen が無いため、CSSで画面を覆う。
+     高さは実測値(--vvh)を使う。dvh はキーボードが覆いかぶさる環境で縮まないため。 */
+  .stage.fs-css {
+    position: fixed; z-index: 100;
+    /* 【inset:0 ではなく top を実測値で置く】
+       iOSはキーボードを出すとき可視領域を下へスクロールさせる。
+       position:fixed はレイアウト側に貼り付くため、top:0 のままだと
+       画面の上へはみ出す(実測: 可視領域が436pxスクロールし、
+       擬似全画面が -436 の位置へ行って何も見えなくなった)。
+       スクロール量(--vvtop)ぶん下げると、見えている帯の先頭に戻る。 */
+    left: 0; right: 0; top: var(--vvtop, 0px);
+    width: 100vw; height: var(--vvh, 100dvh);
+    max-height: none; aspect-ratio: auto; border-radius: 0; border: none;
+  }
+  .stage.fs-css video { width: 100%; height: 100%; object-fit: contain; }
+  /* 擬似全画面は「本物の全画面」ではないため、ページの残り(タブ・トラックパッド等)は
+     生きたまま裏に居る。覆えている間は見えないが、
+     ①無駄に描画・レイアウトされる
+     ②**覆えなくなった瞬間に出てくる**(実際にトラックパッドが出た)
+     ので、全画面中は畳んでおく。文字入力欄は .stage 側へ移してから使うので、
+     ここを畳んでも入力はできる。 */
+  .stage.fs-css ~ #rightcol { display: none; }
+  /* 全画面中の文字入力: #kbd を stage 内へ移して使う */
+  .stage.kbd-fs #kbd {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 7;
+    border-radius: 0; border: none; border-top: .5px solid var(--separator);
+    background: rgba(30,30,32,.92);
+  }
+  /* 【入力欄のぶん映像領域を削る】
+     画面が16:9より横長だと、映像は高さいっぱいに表示される。
+     下端に置いた入力欄は必ず映像に重なる(実機の横画面で発生)。
+     映像の場所を入力欄の上までに狭めて、重なりを無くす。
+
+     JS(fsKbdMeasure)が測った --kbdH をここで使う。
+     videoRect() は #zoomLayer の寸法を基準にしているので、
+     ここを狭めればポインタ座標も自動で追随する
+     (この設計のために videoRect は stage ではなく layer を見ている)。 */
+  .stage.kbd-fs #zoomLayer { bottom: var(--kbdH, 0px); }
+  .stage.kbd-fs #kbd .keys { display: none; }
+
+  /* ---------- 操作タブの密度 ----------
+     トラックパッド(#pad)の面積を稼ぐため、操作タブだけボタン列を詰める。
+     ここは「見せる面」ではなく「指で当てる面」であり、ボタンが縦を食うほど
+     #pad が痩せて、かえってポインタが動かしにくくなる。
+     利用者の判断で、この面に限りデザイン性より操作性を優先した。
+
+     【意図的に HIG の 44px を外している】button の基底は44pxのまま保ち、
+     この面だけ32pxへ落としている。テスト AC12 はこの例外を明示的に許可したうえで、
+     32px を下回らないことを検査している。**これ以上は詰めないこと。**
+
+     【select と入力欄の font-size は落とさないこと】16px未満だと iOS が
+     フォーカス時にズームする(16pxは装飾ではなく機能要件)。高さと余白だけ詰める。
+
+     【カードの背景を消している理由】.setting-card の背景(--bg-2)は button の
+     背景と同じ色で、操作タブでは元から見えていない。枠と余白だけを払っており、
+     見た目の情報は失われない。 */
+  #tab-operate { gap: 6px; }
+  #tab-operate .setting-card {
+    background: transparent; border: none; padding: 0; gap: 6px;
+  }
+  /* 見出しは場所を取らせないが、読み上げには残す(display:none だと読み上げからも消える)。
+     ボタンの文言(スクショ・音量−…)自体が名前になっているため、視覚的には無くても通じる */
+  #tab-operate .sc-label {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  #tab-operate .controls, #tab-operate .sc-row, #tab-operate .kbdrow { gap: 6px; }
+  #tab-operate button { min-height: 32px; padding: 4px 10px; }
+  #tab-operate select, #tab-operate input[type=text] { min-height: 32px; padding: 4px 8px; }
+  #tab-operate .toggle, #tab-operate .fld-inline { min-height: 32px; gap: 6px; }
+  #tab-operate #kbd { padding: 8px; gap: 6px; }
+  /* ボタンの文言は2種類持つ。狭いときは短い方(.bs)、幅があるときは完全な方(.bl)。
+     行数を決めるのは flex-wrap なので、幅が広がれば勝手に行が減る(画面サイズに合わせて可変)。
+
+     【絵柄だけにはしない】狭いときに絵文字だけを出す案は却下された。
+     絵柄は文言の代わりにならず、何のボタンか読めなくなる。
+     どちらの形にも必ず文字を入れること(AC24 が検査している)。
+
+     文言を切り替える判断は**画面幅ではなく、その行自身の幅**で行う。横画面では操作列が
+     画面幅の4割ほどしかなく、画面幅で判断すると入らない文言を出してしまう。
+
+     【注意】container-type は position:fixed の含みブロックを作る。#tabbar や
+     文字入力中の #kbd を巻き込まないよう、コンテナは行(.controls / .sc-row)に限定すること。
+     #rightcol や #tab-operate に付けると、浮かせているバーが固定されなくなる。 */
+  #tab-operate .bl { display: none; }
+  #tab-operate .controls, #tab-operate .sc-row { container-type: inline-size; }
+  /* 画面/入力のプルダウンは必ず横に並べる。
+     flex + wrap のままだと、選択肢の文字が長い環境(iOSのselectは装飾のぶん幅を食う)で
+     2行に折り返し、そのぶんトラックパッドが痩せる。2列に割り付けて折り返しを封じ、
+     入りきらない文字はネイティブの控えめな省略に任せる。 */
+  #tab-operate .sc-row.selects { display: grid; grid-template-columns: 1fr 1fr; }
+  /* ボタンの並びは**等幅**にする。内容の幅に応じて余りを配ると、
+     文言の長いボタンだけが広くなって不揃いに見える(「音ズレ解消」だけ大きい等)。
+     列を等分すれば、どのボタンも同じ幅になる。
+     minmax(0,1fr) の 0 が要る。既定の min-width:auto のままだと
+     内容より狭い列を作れず、長い文言のところだけ列が広がってしまう。
+     いずれの行も4個で固定なので、列数も4で固定してある。 */
+  #tab-operate .primary-controls,
+  #tab-operate .sc-row:not(.selects) {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  #tab-operate .sc-row.selects .fld-inline { min-width: 0; }
+  #tab-operate .sc-row.selects select { width: 100%; min-width: 0; max-width: none; }
+  /* 短い文言のときは左右の余白も詰める。PC操作の8個を1行に収めるために要る。
+     しきい値は「完全な文言でも折り返しが増えない幅」を実測して決めた。
+     ここを下げると、長い文言が出たとたんに行が増えて**かえって縦を食う**。 */
+  #tab-operate .sc-row button, #tab-operate .primary-controls button { padding: 4px 5px; }
+  /* 行の余りをボタンに配る。内容幅のままだと左に詰まって右が空き、
+     幅が変わってもボタンの大きさが変わらない(段だけが変わる)見え方になる。
+     flex-grow で余りを分け合えば、幅の変化にボタンの大きさが連動する。
+     縮む方は許さない(flex-shrink: 0)。縮ませると文言が切れるので、
+     入らないときは今までどおり折り返させる。 */
+  /* 等分された列いっぱいに広げる。
+     【max-width を付けてはいけない】flex で並べていた頃は「折り返した最後の1個が
+     行の全幅まで伸びて帯になる」のを止める上限(33%)が要った。列を等分する今は
+     折り返し自体が起きないので上限は不要で、付けると**割合が列に対して効いてしまい**、
+     83pxの列に24pxのボタンが乗る(実測)。文字は折り返して行が3倍の高さになった。 */
+  #tab-operate .primary-controls button, #tab-operate .sc-row button {
+    width: 100%;
+    /* 折り返させない。等幅の列に対して文言が1pxでも長いと2行になり、
+       その行だけ高さが1.5倍になる(実測46px)。
+       入りきらない場合は末尾を省略する — 行が崩れるより読めない方がまし。 */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* 文字入力パネルのショートカット行も同じ扱いにする。
+     ここだけ内容幅のままだと、右に大きな余白が残って浮いて見える(実測163px)。 */
+  #tab-operate #kbd .keys button { flex: 1 0 auto; }
+  #tab-operate #kbd .keys select { flex: 2 1 auto; max-width: none; }
+  /* しきい値は実測で決めた。上段は完全表記で322px、撮影行は261px、音量行は223px
+     必要(いずれも下の余白6pxのとき)。iPhone相当の幅では使える幅が351pxなので、
+     どの行も1行のまま完全表記になる。
+     余白を10pxに戻すと上段だけが3px入らなくなり、折り返して1行増える。 */
+  @container (min-width: 335px) {
+    #tab-operate .primary-controls .bs { display: none; }
+    #tab-operate .primary-controls .bl { display: inline; }
+    /* 【左右の余白を詰める理由】列が等幅なので、一番長い文言(「🔊 音ズレ解消」)が
+       基準になる。余白6pxのままだと1個あたり88px必要で、4等分には370px要る。
+       iPhone相当の行幅は351pxなので入らない。
+       列が等幅で文字は中央に置かれるため、左右の余白は見た目にほとんど効かない。
+       2pxまで詰めると1個80px・行338pxとなり、13pxの余裕ができる。 */
+    #tab-operate .primary-controls button { padding: 4px 2px; }
+  }
+  @container (min-width: 300px) {
+    #tab-operate .sc-row .bs { display: none; }
+    #tab-operate .sc-row .bl { display: inline; }
+    #tab-operate .sc-row button { padding: 4px 2px; }
+  }
+
+  /* ---------- 画面の向き ---------- */
+  /* 横向き: 映像を左、操作を右に並べて高さを稼ぐ。
+     min-width を併用し、縦持ちでOSキーボードが開いて高さ<幅になった際の
+     「見かけ上のlandscape化」でレイアウトが飛ぶのを防ぐ */
+  @media (orientation: landscape) and (min-width: 600px) {
+    #app { flex-direction: row; flex-wrap: nowrap; }
+    /* 幅を基準に 16:9 を保つ。
+       height:100% と max-width を併用すると aspect-ratio が打ち消され、
+       横長ウィンドウで stage がほぼ正方形になり上下に黒帯が出る(旧デザインの弱点)。 */
+    .stage { flex: 0 0 auto; width: 58%; height: auto; max-height: 100%; }
+    #rightcol { flex: 1 1 320px; min-width: 280px; }
+  }
+  /* 縦持ち・狭い画面: タブバーを下部に置いて親指で届かせる。
+     映像は画面の42%まで。キーボード表示時は dvh が縮んで自動で小さくなる */
+  @media (orientation: portrait), (max-width: 599px) {
+    .stage { max-height: 42dvh; }
+    /* タブバーを**浮かせる**。タブの中身がこの下を流れることで、
+       backdrop-filter が初めて意味を持つ(監査 Major-1 の対応)。
+       同時に、親指の届く位置に固定される利点もある。 */
+    #tabbar {
+      position: fixed; z-index: 20;
+      left: calc(12px + env(safe-area-inset-left));
+      right: calc(12px + env(safe-area-inset-right));
+      bottom: calc(12px + env(safe-area-inset-bottom));
+    }
+    /* タブの中身がバーの裏に潜り込めるよう、下端に余白を作る。
+       余白を親(#app)に付けるとバーの手前で内容が止まり、
+       「下を流れる」表現にならない。 */
+    .tabpage { padding-bottom: 64px; }
+
+    /* ---------- 文字入力中のレイアウト ----------
+       【原因】スマホでは OSキーボードがせり上がることで、実際に見えている領域が縮む。
+       縮んだぶんを勘定に入れないと、映像と入力欄を同時に置けない。
+
+       【dvh に頼れない理由】`interactive-widget=resizes-content` を honor する環境では
+       レイアウト自体が縮む(= dvh が縮む)が、honor しない環境ではレイアウトは元のままで
+       キーボードが**上に覆いかぶさる**だけになる。後者では dvh は縮まないので、
+       dvh を基準にしたレイアウトは「画面外に押し出された入力欄」を作ってしまう。
+       どちらの環境でも正しいのは visualViewport の実測値だけなので、
+       JS がそれを --vvh(実際に見えている高さ) と --kb(せり上がった量) に落としている。 */
+    /* 映像を縮める。再配信クライアントと同じ考え方だが、基準を dvh ではなく
+       実測値(--vvh)にしてある(dvh は環境によっては縮まないため)。
+       文字入力中に限らず、キーボードが出ている間は常に縮めて場所を空ける。 */
+    body.kbd-mode .stage, body.kb-up .stage { max-height: calc(var(--vvh, 100dvh) * .32); }
+    /* 【全画面は例外】全画面中の .stage は画面そのもの。ここで縮めると、
+       擬似全画面では**空いた隙間から下のページ(トラックパッド)が見えてしまう**
+       (実測: 812px → 152px)。本物の全画面でも、拡大中に見える範囲が飛ぶ原因になる。
+       上の規則より詳細度を上げて打ち消す。 */
+    /* 規則は必ず分けて書く(リストに混ぜると、1つ解釈できないだけで全部消える) */
+    body.kbd-mode .stage.fs-css, body.kb-up .stage.fs-css { max-height: none; }
+    body.kbd-mode .stage:fullscreen, body.kb-up .stage:fullscreen { max-height: none; }
+    body.kbd-mode .stage:-webkit-full-screen,
+    body.kb-up .stage:-webkit-full-screen { max-height: none; }
+    /* 【入力欄は貼り付けない】
+       以前は position: fixed で下端に貼っていた。理由は「浮いているタブバーに
+       隠れるから」だったが、いまはキーボードが出ている間タブバーを畳むので
+       その理由は無い。
+
+       貼り付けをやめる理由: iOSはキーボードを出すとき、レイアウトを縮めた**うえに
+       可視領域をスクロールさせる**。position:fixed はレイアウト側に貼り付くため、
+       どこに置いても環境ごとに違う場所へ飛ぶ。実際、全画面を直した副作用で
+       通常時が「何も表示されない(下にスクロールすると出てくる)」状態になった。
+
+       通常の流れに置いておけば、**ブラウザ標準の「フォーカスした入力欄を
+       見える位置へスクロールする」動作**がそのまま働く。ここは各OSが
+       責任を持っている部分で、こちらで座標を計算するより確実。
+       全画面(kbd-fs)側は .stage の中に絶対配置しており、そちらは別の話。 */
+    /* キーボードが出ている間はタブバーを畳む。理由は2つ。
+       ①覆いかぶさる環境では、バーはキーボードの裏に入って押せない
+       ②レイアウトごと縮む環境では、バーが**キーボードと一緒にせり上がってくる**。
+         浮かせている以上これは避けられず、利用者の判断で「NG」とされた。
+       どちらの環境でも畳むのが正しい。キーボードを閉じれば戻る。 */
+    body.kb-up #tabbar { display: none; }
+    body.kb-up .tabpage { padding-bottom: 0; } /* バーが無いぶんの余白も返す */
+    /* 入力欄が流れの中にあるので、下に少しだけ余地を作る
+       (ブラウザが「見える位置へ」スクロールできるように) */
+    body.kbd-mode #tab-operate { padding-bottom: 24px; }
+    /* 【キーボードが出ている間は、映像と入力欄だけを残す】
+       可視領域はキーボードのぶん狭くなる(実測: 793px → 357px)。
+       そこにヘッダ42 + 状態行32 + 映像114 + 間のボタン群161 + 入力欄129 = 478px を
+       積むと入りきらず、ブラウザは**どちらか一方しか出せない**。
+       実機では「入力欄だけ見える」→スクロールすると「映像は出るが入力欄が隠れる」
+       という形で表面化した。
+
+       間のボタン群(音声〜画面OFF・プルダウン)は、文字を打っている間は使わない。
+       畳めば 42+32+114+129 = 317px となり、可視領域に両方収まる。
+       キーボードを閉じれば戻る。
+
+       全画面側は #kbd を映像の隣(.stage の中)へ移すことで同じ問題を避けている。 */
+    body.kb-up.kbd-mode #tab-operate > .controls,
+    body.kb-up.kbd-mode #tab-operate > .setting-card { display: none; }
+    /* 畳んだ結果すべて収まるので、スクロールの余地も無くす。
+       残しておくとブラウザが依然としてスクロールでき、位置が動く余地が残る。 */
+    body.kb-up.kbd-mode #tab-operate { padding-bottom: 0; }
+  }
+
+  /* ---------- アクセシビリティ ---------- */
+  /* キーボードのフォーカス位置を必ず見えるようにする(:focus ではなく :focus-visible) */
+  :focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; }
+
+  /* OSの「視差効果を減らす」設定を尊重する。
+     ただし #vptr の平滑化は装飾ではなくポインタ位置のフィードバックなので残す
+     (消すとカーソルがコマ送りになり操作しづらくなる) */
+  @media (prefers-reduced-motion: reduce) {
+    *:not(#vptr) { transition: none !important; animation: none !important; }
+  }
+  /* OSの「透明度を下げる」設定。ガラスをやめて不透明にする */
+  @media (prefers-reduced-transparency: reduce) {
+    header, #tabbar {
+      background: var(--bg-2) !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+  }
+  /* コントラスト強調。境界をはっきりさせる */
+  @media (prefers-contrast: more) {
+    :root { --label-2: rgba(235,235,245,.85); --separator: rgba(200,200,210,.75); }
+    button, input, select, .setting-card, #guide { border-width: 1px; }
+  }
+
+  /* ---------- ここから下はリモート版だけが持つUI ----------
+     ルームID入力モーダルとQR読取。LAN版には対応する要素が無い。 */
   #roomModal {
-    position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 100;
-    display: none; align-items: center; justify-content: center; padding: 16px;
+    position: fixed; inset: 0; z-index: 100; display: none;
+    align-items: center; justify-content: center; padding: 16px;
+    background: rgba(0,0,0,.72);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
   }
   #roomModal.on { display: flex; }
   #roomBox {
-    background: #11151a; border: 1px solid #2a323b; border-radius: 10px;
-    padding: 16px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 10px;
+    background: var(--bg-2); border: .5px solid var(--separator);
+    border-radius: var(--r-card); padding: 18px;
+    width: 100%; max-width: 420px;
+    display: flex; flex-direction: column; gap: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.55);
   }
-  #roomBox h2 { margin: 0; font-size: 14px; color: #e6e8ea; }
+  #roomBox h2 { margin: 0; font-size: var(--fs-sub); font-weight: 600; color: var(--label); }
   #roomBox .row { display: flex; gap: 8px; flex-wrap: wrap; }
-  #roomBox input[type=text] {
-    flex: 1; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
-    padding: 10px; border-radius: 6px; font: inherit; font-size: 16px;
+  #roomBox input[type=text] { flex: 1; min-width: 160px; }
+  /* 最近つないだ部屋。新しい順。名前は自分で付けられる
+     (ルームIDはランダムな32文字なので、IDだけではどのPCか判別できない)。 */
+  #roomHist { display: flex; flex-direction: column; gap: 6px; max-height: 40dvh; overflow-y: auto; }
+  #roomHist:empty { display: none; }
+  /* 【クラス名の衝突に注意】`.rh` は切り取り枠のリサイズハンドルが既に使っている。
+     この画面の短い名前(bl / bs / dot / fld / hint / rh / row / stage / sty-b / unit)は
+     埋まっているので、履歴側は rhist- で始める。 */
+  .rhist-row {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 8px; border-radius: var(--r-cell);
+    background: var(--bg); border: .5px solid var(--separator);
   }
+  .rhist-top { display: flex; gap: 6px; align-items: center; }
+  /* 名前欄は縮められるようにする。#roomBox input[type=text] の min-width:160px は
+     詳細度(1,1,1)で勝ってしまうため、こちらもID付きで打ち消す。 */
+  #roomHist .rhist-name { flex: 1 1 0; min-width: 0; }
+  .rhist-sub {
+    font-size: var(--fs-body); color: var(--label-2); font-family: var(--mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rhist-row button { min-height: 36px; padding: 4px 10px; flex: none; }
+  .rhist-row .rhist-del { color: var(--red); }
   #qrVideoWrap { display: none; }
   #qrVideoWrap.on { display: block; }
-  #qrVideo { width: 100%; border-radius: 8px; background: #000; }
-  /* フローティングスクロールホイール: 右端中央。つまみをドラッグして上下スクロール */
-  #fwheel {
-    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-    width: 30px; height: 140px; border-radius: 15px; z-index: 6;
-    background: rgba(13,17,22,.5); border: 1px solid rgba(58,68,80,.7);
-    touch-action: none;
-  }
-  #fwThumb {
-    position: absolute; left: 3px; right: 3px; top: 50%; height: 34px;
-    margin-top: -17px; border-radius: 12px; pointer-events: none;
-    background: rgba(127,209,255,.5); border: 1px solid rgba(127,209,255,.8);
-  }
-  /* リモートカーソル形状: 状態色のリングは維持し、中央の形だけ変える */
-  #vptr::after {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
-    font-size: 13px; line-height: 1; color: #fff;
-    text-shadow: 0 0 3px rgba(0,0,0,.9); pointer-events: none;
-  }
-  /* リングドット(A)のときだけ、中央にカーソル形状の記号を重ねる。
-     矢印(B)はカーソル自体が矢印なので記号は重ねない(形状はdata-kindで別途切替も可) */
-  #vptr.sty-a[data-kind="ibeam"]::after { content: "I"; width:auto;height:auto;margin:0;background:none;font-size:12px;font-weight:700;color:#fff;text-shadow:0 0 3px #000;box-shadow:none; }
-  #vptr.sty-a[data-kind="hand"]::after { content: "☝"; width:auto;height:auto;margin:0;background:none;font-size:11px;box-shadow:none;text-shadow:0 0 3px #000; }
-  #vptr.sty-a[data-kind="wait"]::after { content: "⏳"; width:auto;height:auto;margin:0;background:none;font-size:10px;box-shadow:none; }
-  #vptr.sty-a[data-kind="cross"]::after { content: "+"; width:auto;height:auto;margin:0;background:none;font-weight:700;color:#fff;text-shadow:0 0 3px #000;box-shadow:none; }
-  /* ショートカットのプルダウン */
-  .keys select { flex: 1 1 160px; width: auto; min-width: 0; max-width: none; }
-  /* 録画中の表示 */
-  .rec-on { border-color: #e05252 !important; color: #ffb4b4 !important; }
-  /* 再配信の視聴者一覧 */
-  .rs-viewer {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 4px 4px 4px 10px; background: #0f1419; border: 1px solid #1e242b;
-    border-radius: 6px; margin-bottom: 6px; font-size: 12px;
-  }
-  .rs-viewer button { min-height: 30px; padding: 4px 10px; font-size: 11px; }
-  /* 再配信タブ・コメントタブの入力欄 */
-  #rsTitle, #rsPass, #bcText {
-    flex: 1; min-width: 120px; background: #0d1116; border: 1px solid #2a323b;
-    color: #e6e8ea; padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px;
-  }
-  /* コメントのアバター(画像 or 頭文字の丸) */
-  .cm-av {
-    width: 18px; height: 18px; border-radius: 50%; flex: none;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 700; color: #0d1116; overflow: hidden;
-    vertical-align: middle; margin-right: 6px;
-  }
-  .cm-av img { width: 100%; height: 100%; object-fit: cover; }
-  .cm-host { color: #ffd479; font-weight: 700; }
-  /* WoLのMAC入力 */
-  #wolMac {
-    flex: 1; min-width: 150px; background: #0d1116; border: 1px solid #2a323b;
-    color: #e6e8ea; padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 16px;
-  }
-  /* 静止画クロップ */
-  #rsCropStage { position: relative; width: 100%; max-width: 360px; margin: 6px 0;
-    background: #000; border: 1px solid #2a323b; border-radius: 6px; overflow: hidden; touch-action: none; }
-  #rsCropCanvas { display: block; width: 100%; }
-  #rsCropBox { position: absolute; border: 2px solid #2ecf8e; box-shadow: 0 0 0 9999px rgba(0,0,0,.5); box-sizing: border-box; cursor: move; }
-  #rsCropBox .rh { position: absolute; width: 16px; height: 16px; background: #2ecf8e; border-radius: 50%; }
-  #rsCropBox .rh[data-h="nw"] { left: -8px; top: -8px; cursor: nwse-resize; }
-  #rsCropBox .rh[data-h="ne"] { right: -8px; top: -8px; cursor: nesw-resize; }
-  #rsCropBox .rh[data-h="sw"] { left: -8px; bottom: -8px; cursor: nesw-resize; }
-  #rsCropBox .rh[data-h="se"] { right: -8px; bottom: -8px; cursor: nwse-resize; }
-  /* 全画面中の文字入力: #kbdをstage内へ移動して使う。
-     入力欄の高さ(+キーボード持ち上げ分)は --kbdH で映像領域(zoomLayer)から差し引く */
-  .stage.kbd-fs #zoomLayer { bottom: var(--kbdH, 64px); }
-  .stage.kbd-fs #kbd {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 7;
-    background: rgba(13,17,22,.94); border-top: 1px solid #2a323b;
-    padding: 6px 8px; padding-bottom: calc(6px + env(safe-area-inset-bottom));
-    display: block;
-  }
-  .stage.kbd-fs #kbd .keys { display: none; } /* 1行に抑えるため特殊キー列は隠す */
-  /* 映像上のオーバーレイ操作: 全画面中のみ表示(通常時はタブ内のボタンを使う) */
-  .stage-ov { position: absolute; top: 8px; right: 8px; z-index: 6; display: none; gap: 6px; }
-  .stage:fullscreen .stage-ov { display: flex; }
-  .stage:-webkit-full-screen .stage-ov { display: flex; }
-  .stage-ov button, #zoomReset {
-    min-height: 36px; padding: 6px 10px; font-size: 12px;
-    background: rgba(13,17,22,.72); border: 1px solid rgba(58,68,80,.85);
-    border-radius: 6px; backdrop-filter: blur(2px);
-  }
-  /* ピンチズーム中のみ表示されるリセットボタン */
-  #zoomReset { position: absolute; top: 8px; left: 8px; z-index: 6; display: none; }
-  #zoomReset.on { display: block; }
-  /* 再配信タブ: 配信中映像のミニプレビュー */
-  #rsPreview {
-    width: 128px; aspect-ratio: 16/9; height: auto; flex: none;
-    background: #000; border: 1px solid #2a323b; border-radius: 6px; display: block;
-  }
-  /* コメント欄: 入退室のシステム表示 */
-  .rs-comment.rs-sys { opacity: .75; font-style: italic; }
-  /* 接続タブ: 再配信の視聴者履歴 */
-  #rsRoster {
-    font-size: 12px; color: #cfd6dd; max-height: 180px; overflow-y: auto;
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .rs-roster-row { display: flex; align-items: center; gap: 6px; }
-  .rs-roster-row.left { opacity: .55; }
-  /* 再配信タブ */
-  #rsComments { min-height: 120px; max-height: min(60dvh, 480px); overflow: auto; padding: 8px 10px;
-    background: #0a0d10; border: 1px solid #1e242b; border-radius: 6px;
-    display: flex; flex-direction: column; gap: 6px; }
-  .rs-comment { font-size: 12px; line-height: 1.5; word-break: break-word; }
-  .rs-cmeta { color: #7f8b98; margin-right: 6px; font-size: 11px; }
-  #rsQr { margin-top: 8px; background: #fff; padding: 8px; border-radius: 8px; width: fit-content; }
-  #rsQr:empty { display: none; padding: 0; margin: 0; }
-  #rsUrl { flex: 1; min-width: 140px; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
-    padding: 8px; border-radius: 6px; font: inherit; font-size: 12px; }
-  .hintline { font-size: 12px; color: #9aa4b0; }
-  /* OSの「視差効果を減らす」設定を尊重 */
-  @media (prefers-reduced-motion: reduce) {
-    * { transition: none !important; }
-  }
+  #qrVideo { width: 100%; border-radius: var(--r-cell); background: #000; }
 </style>
 </head>
 <body>
@@ -356,9 +770,12 @@
   <div class="stage">
     <div id="zoomLayer">
       <video id="v" autoplay playsinline muted></video>
-      <div id="vptr" class="sty-b"><svg width="22" height="30" viewBox="0 0 22 30"><path d="M1,1 L1,22 L6,17 L10,26 L13,25 L9,16 L16,16 Z"/></svg></div>
       <div id="capMsg" class="cap-msg" style="display:none">映像を再取得中…</div>
     </div>
+    <!-- 仮想ポインタは **#zoomLayer の外** に置く。中に入れるとズームで一緒に
+         拡大され、4倍のときポインタも4倍になって狙いが付けられない。
+         外に出したぶん、位置は drawPtr() が手でズーム換算する。 -->
+    <div id="vptr" class="sty-b"><svg width="22" height="30" viewBox="0 0 22 30"><path d="M1,1 L1,22 L6,17 L10,26 L13,25 L9,16 L16,16 Z"/></svg></div>
     <div class="hint" id="hint">Start で配信開始</div>
     <div class="stage-ov">
       <button id="ovKbd" aria-label="文字入力の表示切り替え">⌨</button>
@@ -371,7 +788,15 @@
 
   <div id="rightcol">
     <!-- 状態ガイド: タブに依存せず常時見える位置に置く -->
-    <div id="guide" role="status" aria-live="polite">接続していません</div>
+    <!-- 状態表示と Start/Stop を1行に並べる。左半分が状態、右半分が操作。
+         Start/Stop はどのタブからでも押せた方が都合がよいので、タブの外に置く。 -->
+    <div id="statusrow">
+      <div id="guide" role="status" aria-live="polite">接続していません</div>
+      <div class="controls" id="startstop">
+        <button id="start" class="primary" disabled>Start</button>
+        <button id="stop" class="danger" disabled>Stop</button>
+      </div>
+    </div>
     <!-- タブバー -->
     <div id="tabbar">
       <button class="tab-btn active" data-tab="operate">操作</button>
@@ -384,28 +809,34 @@
     <!-- 操作タブ -->
     <div class="tabpage active" id="tab-operate">
       <div class="controls primary-controls">
-        <button id="start" class="primary" disabled>Start</button>
-        <button id="stop" class="danger" disabled>Stop</button>
-        <button id="unmute">🔇 音声ON</button>
-        <button id="fsBtn">⛶ 全画面</button>
+        <button id="unmute" title="音声ON"><span class="bs">音声</span><span class="bl">🔇 音声ON</span></button>
+        <button id="fsBtn" title="全画面"><span class="bs">全画面</span><span class="bl">⛶ 全画面</span></button>
+        <button id="lagBtn" title="接続を保ったまま映像の遅延をリセットします"><span class="bs">ラグ</span><span class="bl">⚡ ラグ解消</span></button>
+        <button id="avBtn" title="映像と音声のズレを合わせ直します"><span class="bs">音ズレ</span><span class="bl">🔊 音ズレ解消</span></button>
       </div>
 
-      <div class="controls">
-        <span class="fld-inline"><label for="monSel">画面</label><select id="monSel"><option value="-1">メイン</option></select></span>
-        <span class="fld-inline"><label for="inputModeSel">入力</label><select id="inputModeSel">
-          <option value="pad" selected>🖱 トラックパッド</option>
-          <option value="kbd">⌨ 文字入力</option>
-        </select></span>
-      </div>
-      <div class="controls">
-        <button id="shotBtn">スクショ</button>
-        <button id="recBtn">録画</button>
-        <button id="clipToPc">📋→PC</button>
-        <button id="clipFromPc" disabled>PC→📋</button>
-        <button id="volDown">音量−</button>
-        <button id="volUp">音量＋</button>
-        <button id="volMute">消音</button>
-        <button id="monOff">画面OFF</button>
+      <div class="setting-card">
+        <span class="sc-label">対象と入力方式</span>
+        <div class="sc-row selects">
+          <span class="fld-inline"><label for="monSel">画面</label><select id="monSel"><option value="-1">メイン</option></select></span>
+          <span class="fld-inline"><label for="inputModeSel">入力</label><select id="inputModeSel">
+            <option value="pad" selected>🖱 トラックパッド</option>
+            <option value="kbd">⌨ 文字入力</option>
+          </select></span>
+        </div>
+        <span class="sc-label">PCを操作する</span>
+        <div class="sc-row">
+          <button id="shotBtn" title="画面を画像で保存します"><span class="bs">撮影</span><span class="bl">📷 スクショ</span></button>
+          <button id="recBtn" title="画面を動画で保存します"><span class="bs">録画</span><span class="bl">⏺ 録画</span></button>
+          <button id="clipToPc" title="この端末のコピー内容をPCへ送ります"><span class="bs">→PC</span><span class="bl">📋→PC</span></button>
+          <button id="clipFromPc" disabled title="PCのコピー内容をこの端末へ取り込みます"><span class="bs">PC→</span><span class="bl">PC→📋</span></button>
+        </div>
+        <div class="sc-row">
+          <button id="volDown" title="PCの音量を下げます"><span class="bs">音−</span><span class="bl">音量−</span></button>
+          <button id="volUp" title="PCの音量を上げます"><span class="bs">音＋</span><span class="bl">音量＋</span></button>
+          <button id="volMute" title="PCを消音します"><span class="bs">消音</span><span class="bl">消音</span></button>
+          <button id="monOff" title="PCの画面を消します"><span class="bs">消灯</span><span class="bl">画面OFF</span></button>
+        </div>
       </div>
 
       <!-- 文字入力 -->
@@ -422,6 +853,7 @@
             <option value="esc">Esc</option>
             <option value="backspace">BackSpace</option>
             <option value="delete">Delete</option>
+            <option value="hankaku">半角/全角(IME切替)</option>
             <option value="up">↑</option>
             <option value="down">↓</option>
             <option value="left">←</option>
@@ -442,6 +874,8 @@
             <option value="__custom">＋カスタム追加…</option>
           </select>
           <button id="scSend" class="primary">キー送信</button>
+        <button id="sasBtn" title="ロック画面/ログイン画面で使います">Ctrl+Alt+Del</button>
+        <button id="lockBtn" title="PCの画面をロックします(Win+L相当)">画面ロック</button>
         </div>
       </div>
 
@@ -499,6 +933,10 @@
         </div>
         <div id="rsQr"></div>
       </div>
+      <div class="fld">
+        <label>視聴者履歴</label>
+        <div id="rsRoster">まだ視聴者はいません</div>
+      </div>
       <span class="hintline">※マイクとカメラはHTTPSまたはlocalhostでのみ利用できます。「リモートデスクトップ」はプレーヤーで受信中の映像を再配信します。</span>
     </div>
 
@@ -543,7 +981,7 @@
         <div class="setting-card">
           <span class="sc-label">画質・コーデック</span>
           <div class="sc-row"><label for="codecSel" style="min-width:64px">codec</label><select id="codecSel"><option value="">接続待ち…</option></select></div>
-          <div class="sc-row"><label for="bitrate" style="min-width:64px">bitrate</label><span class="in-unit"><input id="bitrate" type="number" inputmode="numeric" value="1000" min="200" step="100" /><span class="unit">kbps</span></span></div>
+          <div class="sc-row"><label for="bitrate" style="min-width:64px">bitrate</label><span class="in-unit"><input id="bitrate" type="number" inputmode="numeric" value="1500" min="200" step="100" /><span class="unit">kbps</span></span></div>
         </div>
 
         <div class="setting-card">
@@ -551,6 +989,32 @@
           <span class="sc-desc">通常は変更不要です</span>
           <div class="sc-row"><label for="mtu" style="min-width:64px">mtu</label><input id="mtu" type="number" inputmode="numeric" value="1000" min="400" max="1400" step="50" /></div>
           <div class="sc-row"><label for="buffer" style="min-width:64px">buffer</label><span class="in-unit"><input id="buffer" type="number" inputmode="numeric" value="0" min="0" max="2000" step="50" /><span class="unit">ms</span></span></div>
+          <div class="sc-row">
+            <label for="directMouse" style="min-width:64px">直接操作</label>
+            <label class="hintline" style="display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="directMouse" checked style="width:auto" />
+              物理マウス・キーボードは映像上で直接操作する
+            </label>
+          </div>
+          <div class="sc-row">
+            <label for="screenOn" style="min-width:64px">画面点灯</label>
+            <label class="hintline" style="display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="screenOn" style="width:auto" />
+              操作中は画面を消さない(電池を使います。前面にいる間だけ有効)
+            </label>
+          </div>
+          <div class="sc-row"><span class="hintline">バックグラウンド動作: <span id="bgKeepState">-</span></span></div>
+          <div class="sc-row"><span class="hintline">
+            ※バックグラウンド動作(他のアプリに移っても接続を保つこと)はOSへの申告で行います。<b>音声をONにしていないと効きません</b>
+            (鳴っている音が無いと、OSが維持すべきものが無いため)。
+            経過は接続タブのログに時刻付きで残ります。
+          </span></div>
+          <div class="sc-row"><label for="latencyMode" style="min-width:64px">モード</label>
+            <select id="latencyMode">
+              <option value="smooth">動画視聴重視(なめらか)</option>
+              <option value="realtime">リアルタイム重視(低遅延)</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
@@ -566,16 +1030,19 @@
           <span id="roomState">room: 未設定</span>
         </div>
 
-        <div class="setting-card">
-          <span class="sc-label">再配信の視聴者履歴</span>
-          <div id="rsRoster">まだ視聴者はいません</div>
-        </div>
 
         <div class="setting-card">
           <span class="sc-label">通信状態</span>
+          <!-- P2Pが通らない回線を検出したときだけ出る。既定は非表示。 -->
+          <div id="netWarn" class="hintline" style="display:none;color:var(--orange)"></div>
           <div id="stats">stats: —</div>
         </div>
 
+        <div class="setting-card">
+          <span class="sc-label">バージョン</span>
+          <div class="sc-row"><span class="hintline">クライアント: <span id="verClient">-</span></span></div>
+          <div class="sc-row"><span class="hintline">サーバー: <span id="verServer">未接続</span></span></div>
+        </div>
         <div class="setting-card">
           <span class="sc-label">ログ</span>
           <div id="log"></div>
@@ -602,6 +1069,9 @@
       <input id="roomText" type="text" placeholder="ルームIDを入力" maxlength="64" />
       <button id="roomTextOk">決定</button>
     </div>
+    <!-- 最近つないだ部屋(新しい順)。中身はJSが作る。1件も無いときは枠ごと消える。 -->
+    <h2 id="roomHistTitle" style="display:none">最近つないだ部屋</h2>
+    <div id="roomHist"></div>
     <div class="row">
       <button id="roomCancel">閉じる</button>
     </div>
@@ -618,6 +1088,43 @@ let pc, control, ws;
 let currentCodec = "qsv-h264"; // クライアントが選択中のコーデック
 let pendingStart = false;  // Startによる再接続中フラグ（control open時に自動start）
 let serverCPU = -1;        // サーバーCPU使用率(control経由で受信)
+
+// --- 自動再接続の状態 ---
+// 【ここで宣言している理由】reconnect() から触るが、reconnect() の定義は
+// この下にある。const/let を参照より後ろで宣言すると TDZ 違反になり、
+// エラーも出さずにスクリプト全体が止まる(過去に踏んだ地雷)。
+const AUTO_GRACE  = 8000;   // 不健全がこれだけ続いたら「切れた」と見なす
+const AUTO_SETTLE = 12000;  // 接続を張り直している間、判定を止める時間
+const AUTO_WAITS  = [1000, 2000, 4000, 8000, 15000]; // 試行間隔(最後の値で頭打ち)
+let autoArmed = false;      // Startで真、Stopで偽。これが偽の間は何もしない
+let autoTimer = null;       // 次の試行の予約
+let autoTries = 0;          // 連続失敗回数(接続できたらリセット)
+let autoBadSince = 0;       // 不健全になった時刻(0 = 健全、または判定停止中)
+let autoTryingUntil = 0;    // この時刻までは判定しない(接続確立を待っている)
+let autoWatch = null;       // 見張りのタイマー(復帰時に作り直せるよう持っておく)
+let autoProbe = null;       // 復帰直後の確認タイマー
+
+// --- OSキーボードのせり上がりを測るための状態 ---
+// 【ここで宣言している理由】vvSync() は読み込み時の applyInputMode() から呼ばれる。
+// 関数の隣(ファイル後方)で宣言すると**宣言より前に参照**することになり、
+// TDZ違反でスクリプト全体が停止する(実際にこれで一度止めた)。
+let vvBase = 0;             // キーボードが出ていないときの高さ(縮みを測る基準)
+
+// --- 表示ズーム(ピンチ)の状態 ---
+// 【ここで宣言している理由】drawPtr() から参照する。drawPtr はポインタを描くたびに
+// 呼ばれ、読み込み直後にも通る。ズームのモジュール内で宣言すると
+// 「宣言より前の参照」になり、TDZ違反でスクリプト全体が止まる。
+let zoomScale = 1;          // 表示倍率(1〜4)。マウス座標系には影響しない
+let zoomTx = 0, zoomTy = 0; // 表示のずらし量(px、#zoomLayer の座標系)
+let zoomPinching = false;   // ピンチ中(この間は追随しない)
+// 視野の中心が指している「内容上の点」(0〜1)。
+// キーボードの開閉や全画面切り替えで #zoomLayer の寸法が変わると、
+// 同じ ずらし量(px) が別の場所を指してしまい、見える範囲が飛ぶ。
+// 中心の点を覚えておいて、寸法が変わったら同じ点が中心に来るよう置き直す。
+let zoomCx = 0.5, zoomCy = 0.5;
+// 最後に追随したときのポインタ位置。ポインタが動いていないのに
+// 追随を走らせると、ピンチで決めた視野を勝手に引き戻してしまう。
+let zoomFollowedX = NaN, zoomFollowedY = NaN;
 let roomId = localStorage.getItem("dss_room") || ""; // ルームID(保存して再利用)
 let waitTimer = null; // サーバー不在検出用(入室後offerが来ない場合の案内)
 
@@ -716,11 +1223,12 @@ function connect() {
 }
 
 async function setupPeer() {
-  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  pc = new RTCPeerConnection({ iceServers: [{ urls: NAT_STUN }] });
 
   pc.onicecandidate = (e) => {
-    if (!e.candidate) { log("ICE: 候補収集完了"); return; }
+    if (!e.candidate) { log("ICE: 候補収集完了"); natVerdict(); return; }
     const c = e.candidate;
+    natNote(c); // P2Pが通らない回線かどうかの判定材料を集める
     log("ICE send:", `${c.type||"?"} ${(c.address||"").toString().slice(0,32)}`);
     ws.send(JSON.stringify({ type: "candidate", ice: c }));
   };
@@ -822,6 +1330,7 @@ function wireControl(ch) {
         else { authed = false; setState("認証拒否","err"); log("認証拒否: " + (m.reason||"")); $("start").disabled = true; }
         return;
       }
+      if (m.type === "notice") { log("⚠ " + (m.text || "")); return; }
       if (m.type === "captureState") {
         const el = $("capMsg");
         if (el) el.style.display = (m.state === "restarting") ? "" : "none";
@@ -830,8 +1339,13 @@ function wireControl(ch) {
       if (m.type === "cpu") { serverCPU = m.server; }
       if (m.type === "clip" && typeof m.text === "string") { rxClip = m.text; $("clipFromPc").disabled = false; log("PCでコピーを検出(「PC→📋」で取得できます)"); }
       if (m.type === "cursor" && m.kind) setCursorKind(m.kind);
+      if (m.type === "cursorpos") { syncPointerFromServer(m.x, m.y); return; }
       if (m.type === "secure") rsOnSecure(!!m.on);
       if (m.type === "file-ok") log("ファイルをPCに保存しました: " + (m.fname || ""));
+      // サーバーのバージョン。開通直後に一度だけ届く。
+      // リモート版クライアントは GitHub Pages 配信のため、サーバーを更新しても
+      // クライアントだけ古いままになりうる。食い違いを画面で見えるようにしている。
+      if (m.type === "serverinfo") { const o = $("verServer"); if (o) o.textContent = m.version || "不明"; log("サーバー " + (m.version || "不明")); return; }
       if (m.type === "encoders" && Array.isArray(m.list)) {
         const sel = $("codecSel");
         const prev = currentCodec;
@@ -843,7 +1357,12 @@ function wireControl(ch) {
         }
         // 以前の選択が使えるなら維持、無ければ先頭
         if (m.list.some(e => e.id === prev)) { sel.value = prev; }
-        else if (m.list.length) { currentCodec = m.list[0].id; sel.value = currentCodec; }
+        else if (m.list.length) {
+          currentCodec = m.list[0].id; sel.value = currentCodec;
+          // 前回選んだコーデックが今も使えるなら、そちらへ戻す。
+          // 使えない場合(GPUが違うPCに繋いだ等)は既定のままにする。
+          if (settingRestore("codecSel", "dss_codec")) currentCodec = sel.value;
+        }
         log("encoders: " + m.list.map(e=>e.id).join(", "));
       }
       if (m.type === "monitors" && Array.isArray(m.list)) {
@@ -856,6 +1375,9 @@ function wireControl(ch) {
           sel.appendChild(o);
         }
         if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+        // 初回(まだ何も選んでいない)だけ、前回の画面を戻す。
+        // 2回目以降は再接続前の選択(prev)を優先する。
+        else settingRestore("monSel", "dss_monitor");
         log("monitors: " + m.list.length + "台");
       }
     } catch(e){}
@@ -920,11 +1442,261 @@ document.querySelectorAll(".tab-btn").forEach(b => {
 
 // 入力エリアの入れ替え(トラックパッド ⇔ 文字入力)。どちらか一方だけを表示する。
 // デフォルトはトラックパッド。選択はlocalStorageに保存。
+
+// ================= 直接操作モード(物理マウス/キーボードをそのまま反映) =================
+// トラックパッド方式は「なぞった量だけ動かす」ため、PCから操作するときは二度手間になる。
+// 直接操作モードでは、映像の上のマウス位置をそのままPCのカーソル位置として送り、
+// クリック・ホイール・キー入力も押した瞬間に送る。文字入力欄を経由しない。
+// 直接操作を使うか(設定)。既定は有効。
+// トラックパッド(指)と共存できるよう、**物理マウスのときだけ**直接操作にする。
+function directEnabled(){
+  const el = $("directMouse");
+  return el ? !!el.checked : true;
+}
+
+// 画面上の入力欄からフォーカスを外す。
+//
+// 直接操作のキー入力は window の keydown で拾い、入力欄にフォーカスがあるときは
+// 邪魔しないよう素通りさせている(dirIsTypingTarget)。ところが入力方式の
+// プルダウン(<select>)自体もその「入力欄」に該当するため、
+// 「文字入力」に切り替えたあとトラックパッドへ戻すと、フォーカスがプルダウンに
+// 残ったままになり、以後キーがまったく通らなくなっていた。
+// さらに映像上の pointerdown では preventDefault しているので、
+// 映像をクリックしてもブラウザはフォーカスを移してくれず、復帰できなかった。
+// ここで明示的に外して、キー入力を直接操作へ戻す。
+function dirReleaseFocus(){
+  const a = document.activeElement;
+  if (a && a !== document.body && typeof a.blur === "function") a.blur();
+}
+let dirPending = null;   // 次に送る座標(rAFで間引く)
+let dirRaf = 0;
+
+// 映像上の座標を仮想ポインタ位置に反映して送る。
+// 送信頻度は画面更新に合わせて間引く(押しっぱなしのmousemoveで溢れさせないため)。
+function dirQueueMove(clientX, clientY){
+  const v = videoRect();
+  const sr = stage.getBoundingClientRect();
+  const x = clientX - sr.left - v.ox;
+  const y = clientY - sr.top  - v.oy;
+  if (x < 0 || y < 0 || x > v.w || y > v.h) return false; // 映像の外は無視
+  vpx = x; vpy = y;
+  dirPending = true;
+  if (!dirRaf) {
+    dirRaf = requestAnimationFrame(() => {
+      dirRaf = 0;
+      if (!dirPending) return;
+      dirPending = null;
+      drawPtr();
+      sendMouse("move");
+    });
+  }
+  return true;
+}
+
+function dirButtonName(btn){
+  return btn === 2 ? "right" : (btn === 1 ? "middle" : "left");
+}
+
+// イベント登録は初期化関数にまとめる。
+// このブロックはスクリプト前半に置かれており、ここで使う stage / vptr / vpx は
+// 後方で const/let 宣言されている。トップレベルで直接触ると
+// 「初期化前アクセス」でスクリプト全体が止まってしまうため、
+// 宣言より後(末尾)で initDirectInput() を呼ぶ形にする。
+function initDirectInput(){
+  const stage = document.querySelector(".stage");
+  const vptr = document.getElementById("vptr");
+  if (!stage) return;
+
+// --- マウス ---
+stage.addEventListener("pointermove", (e) => {
+  if (!directEnabled() || e.pointerType !== "mouse") return;
+  dirQueueMove(e.clientX, e.clientY);
+}, true);
+
+stage.addEventListener("pointerdown", (e) => {
+  if (!directEnabled() || e.pointerType !== "mouse") return;
+  if (!dirQueueMove(e.clientX, e.clientY)) return;
+  e.preventDefault();
+  dirReleaseFocus(); // preventDefault でフォーカスが移らないため明示的に外す
+  // 押した瞬間に座標も確定させておく(移動の間引きで遅れないように)
+  drawPtr(); sendMouse("move");
+  sendMouse("down", dirButtonName(e.button));
+  vptr.classList.add(e.button === 2 ? "right" : "click");
+}, true);
+
+stage.addEventListener("pointerup", (e) => {
+  if (!directEnabled() || e.pointerType !== "mouse") return;
+  e.preventDefault();
+  sendMouse("up", dirButtonName(e.button));
+  vptr.classList.remove("click","right");
+}, true);
+
+// 物理マウスの操作をブラウザが取り上げた場合も、押したボタンは必ず離す。
+stage.addEventListener("pointercancel", (e) => {
+  if (!directEnabled() || e.pointerType !== "mouse") return;
+  sendMouse("up", dirButtonName(e.button));
+  vptr.classList.remove("click", "right");
+}, true);
+
+// 右クリックのブラウザメニューは邪魔なので抑止する
+stage.addEventListener("contextmenu", (e) => { if (directEnabled()) e.preventDefault(); });
+
+// ホイールは溜めずに即送る(トラックパッド方式の蓄積処理を通さない)
+stage.addEventListener("wheel", (e) => {
+  if (!directEnabled()) return;
+  e.preventDefault();
+  const notches = e.deltaMode === 1 ? -e.deltaY : -(e.deltaY / 100);
+  const n = Math.trunc(notches) || (e.deltaY > 0 ? -1 : 1);
+  sendControl({ type: "wheel", dy: n });
+}, { passive: false });
+
+// --- キーボード ---
+// 押した瞬間に送る。入力欄にフォーカスがあるときは通常の入力として扱う。
+function dirIsTypingTarget(el){
+  if (!el) return false;
+  const t = (el.tagName || "").toLowerCase();
+  return t === "input" || t === "textarea" || t === "select" || el.isContentEditable;
+}
+
+// ブラウザ側のキー名 → サーバーのキー名
+const DIR_KEYMAP = {
+  " ": "space", "ArrowUp": "up", "ArrowDown": "down", "ArrowLeft": "left", "ArrowRight": "right",
+  "Enter": "enter", "Escape": "esc", "Backspace": "backspace", "Tab": "tab", "Delete": "del",
+  "Home": "home", "End": "end", "PageUp": "pageup", "PageDown": "pagedown", "Insert": "insert"
+};
+
+// 日本語入力(IME)のキー。文字を伴わないため DIR_KEYMAP の判定では拾えず、
+// 「半角/全角を押しても切り替わらない」状態になっていた。
+const DIR_IME_KEYS = {
+  "ZenkakuHankaku": "hankaku", "Zenkaku": "hankaku", "Hankaku": "hankaku",
+  "KanjiMode": "hankaku", "Kanji": "hankaku",
+  "Convert": "convert", "NonConvert": "nonconvert",
+  "KanaMode": "kana", "HiraganaKatakana": "kana", "Romaji": "kana",
+};
+
+// e からIMEキーの名前を判定する。該当しなければ null。
+//
+// e.key はブラウザと環境で値が揺れる。特に Chrome/Edge(Windows)は
+// IMEが処理したキーを一律 "Process" と報告するため、e.key だけでは見分けられない。
+// そこで物理キー位置(e.code)も併せて見る。半角/全角キーはJIS配列では
+// Backquote の位置(スキャンコード0x29)にあり、文字を伴わない Backquote は
+// 半角/全角キーとみなしてよい(US配列の ` は e.key が "`" になるため誤爆しない)。
+function dirImeKey(e){
+  const byKey = DIR_IME_KEYS[e.key];
+  if (byKey) return byKey;
+  // e.key も e.code も当てにならない環境があり、そこでは keyCode だけが手がかりになる。
+  // 25=VK_KANJI、243/244=VK_OEM_AUTO/VK_OEM_ENLW(半角/全角が生で届いたとき)。
+  // いずれも通常の文字入力では出ない値なので誤爆しない。
+  if (e.keyCode === 25 || e.keyCode === 243 || e.keyCode === 244) return "hankaku";
+  if (e.key !== "Process" && e.key !== "Unidentified") return null;
+  switch (e.code) {
+    case "Backquote":  return "hankaku";
+    case "Convert":    return "convert";
+    case "NonConvert": return "nonconvert";
+    case "KanaMode":   return "kana";
+    case "Lang1":      return "imeon";  // Macの「かな」
+    case "Lang2":      return "imeoff"; // Macの「英数」
+  }
+  return null;
+}
+
+window.addEventListener("keydown", (e) => {
+  if (!directEnabled()) return;
+  if (dirIsTypingTarget(e.target)) return; // 画面上の入力欄への入力は邪魔しない
+
+  // IMEの切り替えは isComposing の判定より前に見る。
+  // 変換中に半角/全角を押して抜けたい場合も届かせたいため。
+  const imeKey = dirImeKey(e);
+  if (imeKey) {
+    e.preventDefault();
+    sendControl({ type: "key", key: imeKey });
+    return;
+  }
+
+  if (e.isComposing) return;               // 日本語変換中はIMEに任せる
+
+  const mods = [];
+  if (e.ctrlKey) mods.push("ctrl");
+  if (e.altKey) mods.push("alt");
+  if (e.shiftKey) mods.push("shift");
+  if (e.metaKey) mods.push("win");
+
+  // 修飾キー単体は送らない(組み合わせの一部として送るため)
+  if (["Control","Alt","Shift","Meta"].includes(e.key)) return;
+
+  let name = DIR_KEYMAP[e.key];
+  if (!name) {
+    if (/^F\d{1,2}$/.test(e.key)) name = e.key.toLowerCase();      // F1〜F12
+    else if (e.key.length === 1) name = e.key.toLowerCase();
+  }
+  if (!name) return;
+
+  e.preventDefault();
+
+  // 修飾なしの1文字。
+  //
+  // 以前はすべて text(Unicode注入)で送っていた。Unicode注入は
+  // KEYEVENTF_UNICODE で文字そのものを流し込むもので、**IMEを通らない**。
+  // そのためPC側のIMEを日本語にしても、ローマ字がそのままアルファベットで入った。
+  // (半角/全角の切り替え自体は効いているのに字が変わらない、という症状)
+  //
+  // IMEに変換させるにはOSへ「実キー」として見せるしかないため、
+  // 英数字・空白・ー、。は key として送る。IMEが有効なら仮名に変換され、
+  // 無効ならそのまま英数字が入る(どちらでも期待どおりになる)。
+  //
+  // 引き換えに、これらのキーはPC側のキーボード配列に従うようになる。
+  // 英数字はどの配列でも同じ位置なので実害は無いが、配列が大きく違う
+  // (Dvorak等)PCへ送ると字が変わりうる。IMEを通す以上これは避けられない。
+  // その他の記号は配列差で化けるため、従来どおり text のまま送る。
+  // 大文字も text のまま(CapsLockでe.keyと小文字化した名前が食い違うため)。
+  if (mods.length === 0 && e.key.length === 1) {
+    if (e.key === " ") { sendControl({ type: "key", key: "space" }); return; }
+    if (e.key === name && /^[a-z0-9\-,.]$/.test(name)) {
+      sendControl({ type: "key", key: name });
+      return;
+    }
+    sendControl({ type: "text", text: e.key });
+    return;
+  }
+
+  // 修飾がShiftだけの記号(@ ! # など)。
+  //
+  // e.key は既にShiftを反映した文字になっているのに、以前は "shift+@" のような
+  // キー名に組み立てて送っていた。記号はサーバーの vkMap に無いため
+  // 「unknown key」で捨てられ、**Shift付きの記号がまったく入力できなかった**。
+  //
+  // 記号の仮想キーは配列ごとに違う(JISのShift+2は " 、USなら @)ので、
+  // vkMap に足しても正しくならない。クライアントは結果の文字そのものを
+  // 知っているのだから、それを text(Unicode注入)で送るのが確実。
+  // 記号はIMEを通す必要が無いため、Unicode注入で困らない。
+  //
+  // 英数字は除く: 大文字は "shift+a" として実キーで送れ、IMEも通せるため。
+  // 名前付きキー(space/enter等)も除く: "shift+space" は vkMap で引けて正しく動く。
+  if (mods.length === 1 && mods[0] === "shift" && e.key.length === 1
+      && name === e.key.toLowerCase() && !/^[a-z0-9]$/.test(name)) {
+    sendControl({ type: "text", text: e.key });
+    return;
+  }
+
+  sendControl({ type: "key", key: mods.concat(name).join("+") });
+}, true);
+
+} // initDirectInput ここまで
+
 function applyInputMode(){
-  const mode = $("inputModeSel").value; // "pad" | "kbd"
+  const mode = $("inputModeSel").value; // "pad" | "direct" | "kbd"
   $("pad").style.display = (mode === "pad") ? "" : "none";
   $("kbd").style.display = (mode === "kbd") ? "" : "none";
+  // 直接操作は「入力方式」ではなく設定として独立させた(トラックパッドと共存できる)。
+  // 物理マウスは映像上で直接操作、指はトラックパッド、という住み分けになる。
   localStorage.setItem("dss_input_mode", mode);
+  // 文字入力から戻したとき、プルダウンにフォーカスが残っていると
+  // 直接操作のキー入力が通らなくなる(dirReleaseFocus の説明を参照)。
+  if (mode !== "kbd") dirReleaseFocus();
+  // 文字入力中はレイアウトを変える(映像を縮め、入力欄を下端に貼る)。
+  // CSS 側で判断できないため、状態をクラスで渡す。
+  document.body.classList.toggle("kbd-mode", mode === "kbd");
+  vvSync();
 }
 $("inputModeSel").addEventListener("change", () => {
   applyInputMode();
@@ -940,7 +1712,11 @@ $("inputModeSel").addEventListener("change", () => {
 // --- ルームID入力（カメラQR / 写真QR / 文字入力）---
 let qrStream = null, qrScanTimer = null;
 
-$("roomBtn").onclick = () => { $("roomModal").classList.add("on"); $("roomText").value = roomId; };
+$("roomBtn").onclick = () => {
+  $("roomModal").classList.add("on");
+  $("roomText").value = roomId;
+  roomHistRender(); // 並び順と「使用中」の印を最新にする
+};
 $("roomCancel").onclick = () => { closeRoomModal(); };
 function closeRoomModal(){
   $("roomModal").classList.remove("on");
@@ -951,11 +1727,101 @@ function setRoomId(id){
   if (!id) return;
   roomId = id;
   localStorage.setItem("dss_room", roomId);
+  roomHistTouch(roomId); // 履歴の先頭へ(名前は既にあれば残す)
   updateRoomState();
   log("room set: " + roomId.slice(0,8) + "…");
   closeRoomModal();
   reconnect(); // 新しいルームで接続し直す
 }
+
+// ===== 最近つないだ部屋 =====
+// ルームIDはランダムな32文字で、**実質的な接続パスワード**でもある。
+//   ・IDだけでは「どのPCか」判別できない → 自分で名前を付けられるようにする
+//   ・全部を画面に並べない → 肩越しに見られる/スクリーンショットに写るのを避ける
+//     (選ぶのに必要な情報は先頭と末尾だけで足りる)
+const ROOM_HIST_MAX = 10;
+function roomHistLoad(){
+  try {
+    const a = JSON.parse(localStorage.getItem("dss_rooms") || "[]");
+    return Array.isArray(a) ? a.filter(x => x && typeof x.id === "string") : [];
+  } catch(e){ return []; }
+}
+function roomHistSave(list){
+  try { localStorage.setItem("dss_rooms", JSON.stringify(list.slice(0, ROOM_HIST_MAX))); } catch(e){}
+}
+// 使ったルームを先頭へ。既にあれば名前を残したまま日時だけ更新する。
+function roomHistTouch(id){
+  if (!id) return;
+  const list = roomHistLoad();
+  const i = list.findIndex(x => x.id === id);
+  const entry = (i >= 0) ? list.splice(i, 1)[0] : { id, name: "" };
+  entry.at = Date.now();
+  list.unshift(entry);
+  roomHistSave(list);
+  roomHistRender();
+}
+function roomHistShortId(id){
+  return id.length <= 14 ? id : (id.slice(0, 8) + "…" + id.slice(-4));
+}
+function roomHistWhen(ms){
+  if (!ms) return "";
+  const d = new Date(ms), z = (n) => String(n).padStart(2, "0");
+  return (d.getMonth()+1) + "/" + d.getDate() + " " + z(d.getHours()) + ":" + z(d.getMinutes());
+}
+function roomHistRender(){
+  const box = $("roomHist"), title = $("roomHistTitle");
+  if (!box) return;
+  const list = roomHistLoad();
+  box.innerHTML = "";
+  if (title) title.style.display = list.length ? "" : "none";
+  for (const e of list){
+    const row = document.createElement("div");
+    row.className = "rhist-row";
+
+    const top = document.createElement("div");
+    top.className = "rhist-top";
+
+    // 名前は常に入力欄として出す。編集ボタンを別に置くより手数が少ない。
+    const name = document.createElement("input");
+    name.type = "text";
+    name.className = "rhist-name";
+    name.placeholder = "名前(任意)";
+    name.maxLength = 24;
+    name.value = e.name || "";
+    name.addEventListener("change", () => {
+      const l = roomHistLoad();
+      const t = l.find(x => x.id === e.id);
+      if (t){ t.name = name.value.trim().slice(0, 24); roomHistSave(l); }
+    });
+
+    const use = document.createElement("button");
+    use.textContent = "選ぶ";
+    use.onclick = () => setRoomId(e.id);
+
+    const del = document.createElement("button");
+    del.className = "rhist-del";
+    del.textContent = "×";
+    del.setAttribute("aria-label", "この部屋を履歴から消す");
+    del.onclick = () => {
+      roomHistSave(roomHistLoad().filter(x => x.id !== e.id));
+      roomHistRender();
+    };
+
+    top.appendChild(name); top.appendChild(use); top.appendChild(del);
+
+    const sub = document.createElement("div");
+    sub.className = "rhist-sub";
+    sub.textContent = roomHistShortId(e.id) + (e.at ? " · " + roomHistWhen(e.at) : "") +
+                      (e.id === roomId ? " · 使用中" : "");
+
+    row.appendChild(top); row.appendChild(sub);
+    box.appendChild(row);
+  }
+}
+// 既にルームIDが設定されている端末では、それを履歴の起点にする
+// (この機能を足す前から使っていた場合に、履歴が空のままにならないように)
+if (roomId && !roomHistLoad().some(x => x.id === roomId)) roomHistTouch(roomId);
+roomHistRender();
 
 // 文字入力
 $("roomTextOk").onclick = () => setRoomId($("roomText").value);
@@ -1044,6 +1910,7 @@ $("reconnBtn").onclick = () => {
 // コーデック切り替えと同じく、毎回新しいトラックで始めるためトラックの不連続が起きない。
 $("start").onclick = () => {
   pendingStart = true;
+  autoArm();          // ここから自動再接続の監視を始める
   log("start -> reconnect");
   reconnect(); // 再接続後、control open で自動的に start を送る
 };
@@ -1059,9 +1926,13 @@ function toggleMute(){
 }
 // 操作タブ内と映像オーバーレイの音声ボタン表示を常に同期する
 function setMuteLabel(){
-  const t = video.muted ? "🔇 音声ON" : "🔊 音声OFF";
-  $("unmute").textContent = t;
-  $("ovMute").textContent = t;
+  const icon = video.muted ? "🔇" : "🔊";
+  const label = video.muted ? "音声ON" : "音声OFF";
+  // 操作タブのボタンは狭い画面で短い文言に切り替わるため、2種類の文言を別の要素で持つ。
+  // textContent で丸ごと書き換えると span 構造が壊れ、切り替えが効かなくなる。
+  $("unmute").innerHTML = '<span class="bs">音声</span><span class="bl">' + icon + " " + label + '</span>';
+  $("unmute").title = label;
+  $("ovMute").textContent = icon + " " + label; // 映像上のボタンは幅があるので常に完全な文言
 }
 
 // コーデック切り替え: 設定を変えるだけ。次回 Start 時に反映される。
@@ -1072,12 +1943,18 @@ $("codecSel").addEventListener("change", () => {
 });
 
 function reconnect() {
+  // 張り直している間は自動再接続の判定を止める。
+  // モニタ切替・コーデック変更・手動再接続・Start もここを通るため、
+  // 「意図的な再接続を切断と誤認する」経路がこの1行で全部塞がる。
+  autoTryingUntil = Date.now() + AUTO_SETTLE;
+  autoBadSince = 0;
   // 既存の接続を破棄して作り直す。
   try { if (control) control.close(); } catch(e){}
   try { if (pc) pc.close(); } catch(e){}
   try { if (ws) ws.close(); } catch(e){}
   control = null; pc = null;
   video.srcObject = null;
+  { const el = $("capMsg"); if (el) el.style.display = "none"; } // 再取得中表示をリセット
   $("start").disabled = true; $("stop").disabled = true;
   $("hint").style.display = "";
   // サーバーはbye受信後、Ayameのルームに入り直すまで約1秒かかる。
@@ -1087,10 +1964,154 @@ function reconnect() {
   setTimeout(connect, 3000);
 }
 $("stop").onclick = () => {
+  autoDisarm();       // 自動再接続を止める(利用者が明確に「終わり」と言った操作)
   sendControl({ type: "stop" });
   $("start").disabled = false; $("stop").disabled = true;
   updateGuide("connected", "on");
 };
+
+
+// ================= 自動再接続 =================
+// 切れたら「再接続ボタン + Start」と同じことを自動でやり直す。
+//
+// 【動くのは Start を押してから Stop を押すまでの間だけ】
+// まだ配信していない状態で勝手に繋ぎに行っても意味がなく、
+// Stop は利用者が明確に「終わり」と言った操作なので、そこで止める。
+//
+// 【イベントではなくポーリングで検知している理由】
+// pc の failed / control.onclose / ws.onclose は、モニタ切替・コーデック変更・
+// 手動再接続・Start のたびに**正常に発火する**。これらを切断と見なさないための
+// 抑制フラグを各所に配ると、抑制漏れ(誤検知で延々と繋ぎ直す)と
+// 抑制しすぎ(本物の切断を取りこぼす)を同時に作り込むことになる。
+// 「健全でない状態が続いた」という一点だけを見れば、意図的な再接続は
+// 猶予の内側で終わるので、そもそも誤検知が起きない。
+// 代償は、検知が最大 AUTO_GRACE 分だけ遅れること。これは承知のうえで選んでいる
+// (地雷: 誤検知で頻繁に再取得が走ると実用不能になる。軽い判定から段階的に)。
+//
+// 【回数の上限を設けない理由】
+// 上限に達すると黙って諦めることになり、「PCがスリープから戻った」
+// 「Wi-Fiが復帰した」で復旧できなくなる。間隔を伸ばして待ち続ける。
+function autoLog(msg){
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  // バックグラウンド中は画面が見えないため、時刻を添えてログに残す
+  try { log(z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds()) + " [自動再接続] " + msg); } catch(e){}
+}
+// 健全 = 経路が張れていて、かつ制御チャネルが開いている。
+// 映像が流れているかまでは見ない(それはサーバー側の復旧が受け持つ)。
+function autoHealthy(){
+  try {
+    return !!(pc && pc.connectionState === "connected" &&
+              control && control.readyState === "open");
+  } catch(e){ return false; }
+}
+function autoArm(){
+  autoArmed = true; autoTries = 0;
+  autoLog("有効(Stopを押すまで、切れたら自動で繋ぎ直します)");
+}
+function autoDisarm(){
+  if (!autoArmed) return;
+  autoArmed = false; autoBadSince = 0; autoTryingUntil = 0;
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  autoLog("停止(Stopが押されました)");
+}
+// 実際に張り直す。やることは「再接続ボタン + Start」と同じ。
+function autoAttempt(){
+  if (!autoArmed) return;
+  autoTries++;
+  autoLog(autoTries + "回目の試行");
+  pendingStart = true;  // control が開いたら markReady() が自動で start を送る
+  reconnect();          // ここで autoTryingUntil / autoBadSince が仕込まれる
+  // reconnect() は Stop も無効にするが、それだと自動再接続を止める手段が
+  // 無くなってしまう(繋がるまで Stop が押せない)。Stop だけは押せる状態に戻す。
+  $("stop").disabled = false;
+  const g = $("guide");
+  if (g) { g.textContent = "自動再接続中… (" + autoTries + "回目)"; g.className = "warn"; }
+}
+function autoSchedule(why){
+  if (!autoArmed || autoTimer) return;
+  const wait = AUTO_WAITS[Math.min(autoTries, AUTO_WAITS.length - 1)];
+  autoLog(why + " → " + (wait / 1000) + "秒後に試します");
+  autoTimer = setTimeout(() => { autoTimer = null; autoAttempt(); }, wait);
+}
+function autoTick(){
+  if (!autoArmed) { autoBadSince = 0; return; }
+  if (autoHealthy()) {
+    if (autoBadSince || autoTries) autoLog("接続できています");
+    autoBadSince = 0; autoTries = 0; autoTryingUntil = 0;
+    return;
+  }
+  if (Date.now() < autoTryingUntil) return;   // 張り直している最中は判定しない
+  if (!autoBadSince) { autoBadSince = Date.now(); return; }
+  // 猶予は「初回の判定」だけ長く取る。AUTO_GRACE は正常動作中の一時的な状態を
+  // 切断と誤読しないための時間であり、すでに1回失敗して張り直しの最中にいるなら
+  // その心配は無い。ここを長いままにすると、次の試行まで毎回8秒余分に待つ。
+  const grace = autoTries ? 2000 : AUTO_GRACE;
+  if (Date.now() - autoBadSince < grace) return;
+  autoSchedule("接続が" + Math.round((Date.now() - autoBadSince) / 1000) + "秒途切れています");
+}
+// 見張りは作り直せるようにしておく。背面では setInterval が抑制され、
+// 環境によっては**破棄される**。戻ってきたときに動いている保証が無い。
+function autoRestartWatch(){
+  if (autoWatch) clearInterval(autoWatch);
+  autoWatch = setInterval(autoTick, 2000);
+}
+autoRestartWatch();
+
+// 映像の再生位置。実際に絵が進んでいるかを測る唯一の手掛かり。
+function autoMediaClock(){ try { return video.currentTime || 0; } catch(e){ return 0; } }
+function autoConnName(){ try { return pc ? pc.connectionState : "未接続"; } catch(e){ return "不明"; } }
+
+// ================= フォアグラウンド復帰 =================
+// この機能は**バックグラウンドで切れたときの復旧**が目的なので、ここが本命の経路。
+//
+// 【接続状態を信じてはいけない】背面から戻った直後、pc.connectionState は
+// **"connected" のまま実際には死んでいる**ことがある(ICEがまだ気づいていない)。
+// 以前はここで autoHealthy() を見て「健全なら何もしない」としていたため、
+// **本命の経路が丸ごと動かなかった**。通信断のときは pc が failed になるので
+// 検知できており、それが「通信断では動くのに復帰では動かない」の正体だった。
+//
+// 【ポーリングに預けない】背面では setInterval が抑制・破棄されうる。
+// 復帰の判断を、死んでいるかもしれない仕組みに任せてはいけない。ここで完結させる。
+//
+// 【映像で確かめる】接続状態が当てにならない以上、絵が進んでいるかを実測する。
+// 定常運転でこれをやると、サーバー側の映像復旧中に誤って張り直してしまうため、
+// **復帰直後の判断にだけ**使う。
+function autoOnForeground(why){
+  if (!autoArmed) return;
+  if (Date.now() < autoTryingUntil) return; // 張り直している最中は触らない
+  if (autoProbe) return;                    // 確認中なら二重に始めない
+  autoRestartWatch();                       // 止まっているかもしれない見張りを作り直す
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  autoTries = 0; autoBadSince = 0;
+  const t0 = autoMediaClock();
+  autoLog(why + ": 確認します(接続=" + autoConnName() + " 映像位置=" + t0.toFixed(1) + ")");
+  // 戻った直後は一時的に disconnected に見えることがある。
+  // 即座に張り直すと**生きている接続を自分で切る**ので、少しだけ様子を見る。
+  autoProbe = setTimeout(() => {
+    autoProbe = null;
+    if (!autoArmed) return;
+    const t1 = autoMediaClock();
+    const moved = t1 > t0 + 0.05;
+    if (autoHealthy() && moved) {
+      autoLog("接続は生きていました(映像位置=" + t1.toFixed(1) + ")");
+      return;
+    }
+    autoLog("復帰後の状態: 接続=" + autoConnName() + " 映像位置=" + t1.toFixed(1) +
+            (moved ? "(進行あり)" : "(進んでいません)") + " → 張り直します");
+    autoAttempt();
+  }, 2200);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") autoOnForeground("フォアグラウンド復帰");
+});
+// bfcache から戻った場合は visibilitychange が出ないことがある
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted) autoOnForeground("ページ復元");
+});
+// PWA・ホーム画面起動では visibilitychange が出ない環境がある
+window.addEventListener("focus", () => {
+  if (document.visibilityState === "visible") autoOnForeground("ウィンドウ復帰");
+});
 
 // --- マウス操作: 仮想ポインタ方式 + 入力元切替（要件12） ---
 // 仮想ポインタは常に映像(.stage)上に表示。座標基準も常に .stage。
@@ -1119,7 +2140,16 @@ const LONGPRESS = 1000;     // 長押し=右クリック判定(ms)
 const DRAG_HOLD = 180;      // 2度目の押下をこの時間以上保持で「ドラッグ入り」
 const DBL_WINDOW = 350;     // 直前タップからこの時間内の2度目押下を連続とみなす
 
-function isFs(){ return document.fullscreenElement === stage || document.webkitFullscreenElement === stage; }
+// 全画面かどうか。**CSSによる擬似全画面も含める**。
+// iPhone の Safari は div に対する全画面APIを持たない(video.webkitEnterFullscreen だけ)。
+// そのままだと全画面ボタンが無反応になるため、CSSで画面いっぱいに広げる方法へ落とす。
+// ここを一本化しておくことで、映像矩形の計算・文字入力の移動・トラックパッドの
+// 無効化といった「全画面中の振る舞い」が、どちらの方式でもそのまま動く。
+function isFs(){
+  return document.fullscreenElement === stage ||
+         document.webkitFullscreenElement === stage ||
+         stage.classList.contains("fs-css");
+}
 
 // 実際に映像が表示されている矩形(stage内のオフセットとサイズ)を返す。
 // 非全画面: 映像はstage全面(fill)。全画面: contain によるレターボックスを計算。
@@ -1145,10 +2175,113 @@ function clampPtr(){
   vpy = Math.max(0, Math.min(v.h, vpy));
 }
 function drawPtr(){
+  zoomFollow(); // 先に視野を動かす(動いた後の位置でポインタを置く)
   const v = videoRect();
-  vptr.style.left = (v.ox + vpx)+"px";
-  vptr.style.top  = (v.oy + vpy)+"px";
+  // #vptr は #zoomLayer の外にあるので transform がかからない。
+  // 位置だけ手で換算する。**大きさは倍率に関わらず一定**(意図した挙動)。
+  vptr.style.left = ((v.ox + vpx) * zoomScale + zoomTx)+"px";
+  vptr.style.top  = ((v.oy + vpy) * zoomScale + zoomTy)+"px";
   // A/Bとも基準点は要素の(left,top)。Aは中心マージン、BはSVG左上頂点=先端で合わせてある。
+}
+
+// 表示のずらし量を、**映像**が画面から外れない範囲へ収める。
+//
+// 【レイヤではなく映像を基準にする理由】
+// 全画面では映像がレターボックスされ、#zoomLayer の大部分が黒帯になる
+// (実測: 画面812pxに対して映像211px、上下に301pxずつの帯)。
+// レイヤを基準に制限すると視野が帯の中まで動けてしまい、
+// 4倍にしても画面の23%が黒帯という状態が起きる。しかもどれだけ帯が入るかは
+// ポインタ位置で変わるため、「位置によって拡大できる量が変わる」ように見えていた。
+// 映像の矩形を基準にすれば、視野は必ず映像の内側に留まる。
+function zoomClamp(lw, lh){
+  const v = videoRect();
+  // 映像が画面より大きい軸: 画面を覆う範囲に収める。
+  // 小さい軸(倍率が低いとき): 中央に置く(レターボックスを左右/上下で等しくする)。
+  const fit = (t, off, size, view) => {
+    const lo = view - (off + size) * zoomScale; // これ未満だと右(下)に隙間ができる
+    const hi = -off * zoomScale;                // これ超だと左(上)に隙間ができる
+    if (lo > hi) return (view - size * zoomScale) / 2 - off * zoomScale;
+    return Math.min(hi, Math.max(lo, t));
+  };
+  zoomTx = fit(zoomTx, v.ox, v.w, lw);
+  zoomTy = fit(zoomTy, v.oy, v.h, lh);
+}
+function zoomApply(){
+  const layer = $("zoomLayer");
+  layer.style.transform = (zoomScale > 1.01)
+    ? `translate(${zoomTx}px, ${zoomTy}px) scale(${zoomScale})` : "";
+  $("zoomReset").classList.toggle("on", zoomScale > 1.01); // ズーム中のみリセットを出す
+  zoomRemember();
+}
+
+// いま視野の中心にある「内容上の点」を覚える。
+function zoomRemember(){
+  if (zoomScale <= 1.01){ zoomCx = 0.5; zoomCy = 0.5; return; }
+  const layer = $("zoomLayer");
+  const lw = layer.offsetWidth, lh = layer.offsetHeight;
+  const v = videoRect();
+  if (!lw || !lh || !v.w || !v.h) return;
+  zoomCx = ((lw/2 - zoomTx) / zoomScale - v.ox) / v.w;
+  zoomCy = ((lh/2 - zoomTy) / zoomScale - v.oy) / v.h;
+}
+
+// レイアウトが変わったあと、覚えておいた点が中心に来るよう置き直す。
+//
+// 【これが要る理由】ずらし量は px で持っているため、キーボードの開閉や
+// 全画面切り替えで #zoomLayer の寸法が変わると、同じ値が別の場所を指す。
+// 拡大中にキーボードを出すと見える範囲が大きく飛ぶ、という形で表面化する。
+function zoomRelayout(){
+  if (zoomScale <= 1.01){ zoomTx = 0; zoomTy = 0; zoomApply(); return; }
+  const layer = $("zoomLayer");
+  const lw = layer.offsetWidth, lh = layer.offsetHeight;
+  const v = videoRect();
+  if (!lw || !lh || !v.w || !v.h) return;
+  const cx = zoomCx, cy = zoomCy; // zoomApply が上書きするので退避
+  zoomTx = lw/2 - (v.ox + cx * v.w) * zoomScale;
+  zoomTy = lh/2 - (v.oy + cy * v.h) * zoomScale;
+  zoomClamp(lw, lh);
+  zoomApply();
+}
+
+// ===== ポインタ追随 =====
+// ズーム中、ポインタが**画面中央のマス**から出たら視野をそちらへ動かす。
+// 中央のマスに居る間は動かないので、細かい操作中に画面が揺れない。
+//
+// 【9分割するのは「画面」であって映像ではない】
+// 映像の解像度で割ると、全画面でレターボックスが付いたときに
+// 「どこまで寄れば動き出すか」が変わってしまう。実際に見えている領域
+// (#zoomLayer の箱)を3×3に割れば、縦横比や解像度が変わっても
+// 「中央付近は動かない/端に寄ると動く」という操作感が揃う。
+function zoomFollow(){
+  if (zoomScale <= 1.01){
+    zoomTx = 0; zoomTy = 0;
+    zoomFollowedX = NaN; zoomFollowedY = NaN;
+    return;
+  }
+  // 【ピンチ中は追随しない】
+  // ピンチが視野を決めた直後にここが走ると、ポインタを中央へ寄せるために
+  // 視野を上書きしてしまい、**触った点が固定されない**。
+  // 実測では1.2倍で33px、4倍で358pxずれた(画面外)。
+  // ポインタが中央のマスに居る間は干渉しないため、
+  // 「一定の倍率を超えると中心が変わる」という形で表面化していた。
+  if (zoomPinching) return;
+  // 【ポインタが動いていないなら何もしない】
+  // ピンチを離した直後、drawPtr() は他の理由(サーバーからのカーソル通知、
+  // 画面回転、全画面切り替えなど)でも呼ばれる。そのたびに追随すると、
+  // 指を離した瞬間に視野が引き戻される。動いたときだけ追う。
+  if (vpx === zoomFollowedX && vpy === zoomFollowedY) return;
+  const layer = $("zoomLayer");
+  const lw = layer.offsetWidth, lh = layer.offsetHeight;
+  if (!lw || !lh) return;
+  const v = videoRect();
+  const sx = (v.ox + vpx) * zoomScale + zoomTx; // ポインタの画面上の位置
+  const sy = (v.oy + vpy) * zoomScale + zoomTy;
+  const x0 = lw/3, x1 = lw*2/3, y0 = lh/3, y1 = lh*2/3; // 中央のマス
+  if (sx < x0) zoomTx += x0 - sx; else if (sx > x1) zoomTx += x1 - sx;
+  if (sy < y0) zoomTy += y0 - sy; else if (sy > y1) zoomTy += y1 - sy;
+  zoomClamp(lw, lh);
+  zoomFollowedX = vpx; zoomFollowedY = vpy;
+  zoomApply();
 }
 
 // 仮想ポインタの表示位置を更新(全画面切り替え時のレターボックス補正を含む)
@@ -1156,6 +2289,7 @@ function updateMouseUI(){
   vptr.classList.add("on");
   const v = videoRect();
   if (vpx === 0 && vpy === 0){ vpx = v.w/2; vpy = v.h/2; }
+  zoomRelayout(); // 寸法が変わっている可能性があるので、視野を置き直してから描く
   clampPtr(); drawPtr();
 }
 
@@ -1164,11 +2298,89 @@ video.addEventListener("loadedmetadata", updateMouseUI); // 映像サイズ確�
 document.addEventListener("webkitfullscreenchange", updateMouseUI);
 
 // 全画面ボタン: .stage(映像+ポインタ)を全画面化
+//
+// 【iPhoneで効かなかった理由】iOS Safari は要素の全画面API(requestFullscreen /
+// webkitRequestFullscreen)を **div に対しては持っていない**。持っているのは
+// video.webkitEnterFullscreen() だけで、それはOS標準のプレーヤーを出すため、
+// 仮想ポインタも操作UIも乗らない(この用途では使えない)。
+// 以前は関数が undefined のまま .call しており、例外で黙って終わっていた。
+// APIが無い環境では CSS で画面いっぱいに広げる方式へ落とす。
+function fsApply(){
+  updateMouseUI();
+  fsKbdMeasure();
+}
+
+// ===== 全画面・キーボードの状態をログに出す =====
+// 【なぜログなのか】全画面中は画面が見えないため、その場の表示では確認できない。
+// また、iOSの挙動はこちらの環境では再現できない(擬似全画面という別経路になる)。
+// 実機に数値を吐かせて、こちらはそれを読む。
+function fsDiag(tag){
+  try {
+    const d = new Date(), z = (n) => String(n).padStart(2, "0");
+    const t = z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds());
+    const r = stage.getBoundingClientRect();
+    const cs = getComputedStyle(stage);
+    const kbd = $("kbd");
+    const kr = kbd ? kbd.getBoundingClientRect() : null;
+    const vv = window.visualViewport;
+    const st = getComputedStyle(document.documentElement);
+    log(t + " [診断] " + tag +
+      " stage=" + Math.round(r.width) + "x" + Math.round(r.height) +
+      "@" + Math.round(r.left) + "," + Math.round(r.top) +
+      " pos=" + cs.position + " maxH=" + cs.maxHeight + " h=" + cs.height +
+      " | fs=" + (document.fullscreenElement ? "native" :
+                  document.webkitFullscreenElement ? "webkit" :
+                  stage.classList.contains("fs-css") ? "css" : "no") +
+      " isFs=" + isFs() +
+      " | vvh=" + st.getPropertyValue("--vvh").trim() +
+      " kb=" + st.getPropertyValue("--kb").trim() +
+      " vvtop=" + st.getPropertyValue("--vvtop").trim() +
+      " kbup=" + document.body.classList.contains("kb-up") +
+      " kbdmode=" + document.body.classList.contains("kbd-mode") +
+      " | innerH=" + window.innerHeight +
+      " vv=" + (vv ? Math.round(vv.height) + "+" + Math.round(vv.offsetTop) : "無し") +
+      " | kbd=" + (kr ? Math.round(kr.top) + ".." + Math.round(kr.bottom) : "無し") +
+      " 親=" + (kbd && kbd.parentNode === stage ? "stage" : "tab") +
+      " kbdfs=" + stage.classList.contains("kbd-fs") +
+      " | pad=" + (function(){ try { const p = $("pad").getBoundingClientRect();
+        return Math.round(p.top) + ".." + Math.round(p.bottom) +
+               "(" + getComputedStyle($("pad")).display + ")"; } catch(e){ return "?"; } })());
+  } catch(e){}
+}
 function toggleFs(){
   if (isFs()){
-    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-  } else {
-    (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage);
+    if (stage.classList.contains("fs-css")){
+      stage.classList.remove("fs-css");
+      fsKbdOff();
+      fsApply();
+      return;
+    }
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) exit.call(document);
+    return;
+  }
+  const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+  if (!req){
+    fsDiag("全画面へ(APIなし→CSS方式)");
+    stage.classList.add("fs-css");
+    fsApply();
+    fsDiag("全画面になった(CSS方式)");
+    return;
+  }
+  try {
+    fsDiag("全画面へ(APIあり)");
+    const p = req.call(stage);
+    // 失敗しても黙って終わらせない(iPadOSなど「あるのに拒否される」環境がある)
+    if (p && p.catch) p.catch((e) => {
+      log("全画面APIが拒否されました: " + (e && e.name ? e.name : e) + " → CSS方式へ");
+      stage.classList.add("fs-css"); fsApply(); fsDiag("全画面になった(CSS方式・拒否後)");
+    });
+    if (p && p.then) p.then(() => fsDiag("全画面になった(API)"));
+  } catch(e){
+    log("全画面APIが例外を投げました: " + (e && e.name ? e.name : e) + " → CSS方式へ");
+    stage.classList.add("fs-css");
+    fsApply();
+    fsDiag("全画面になった(CSS方式・例外後)");
   }
 }
 $("fsBtn").onclick = toggleFs;
@@ -1186,7 +2398,10 @@ function fsKbdOn(){
   kbd.style.display = ""; // トラックパッド選択中でも全画面中は表示する
   stage.classList.add("kbd-fs");
   fsKbdMeasure();
+  fsDiag("文字入力を開いた(フォーカス前)");
   $("kbdText").focus();
+  // フォーカスでOSキーボードが出る。出た後の状態も残す(時間差で開くため遅らせる)。
+  setTimeout(() => fsDiag("文字入力を開いた(キーボード後)"), 700);
 }
 function fsKbdOff(){
   const kbd = $("kbd");
@@ -1197,6 +2412,7 @@ function fsKbdOff(){
   if (kbdHome && kbd.parentNode === stage) kbdHome.parentNode.insertBefore(kbd, kbdHome);
   applyInputMode(); // タブ内での表示状態(トラックパッド/文字入力)を復元
   updateMouseUI();
+  fsDiag("文字入力を閉じた");
 }
 // 入力欄の高さと、OSキーボードによる持ち上げ量を反映する。
 // interactive-widget=resizes-content が効く環境ではレイアウト自体が縮む(lift≒0)。
@@ -1211,18 +2427,135 @@ function fsKbdMeasure(){
   }
   kbd.style.bottom = lift + "px";
   stage.style.setProperty("--kbdH", (kbd.offsetHeight + lift) + "px");
-  updateMouseUI(); // 映像領域が変わるためポインタ位置を再計算(座標ズレ防止)
+  // 映像領域が変わるため、視野の置き直しとポインタ位置の再計算を行う。
+  // 置き直さないと、拡大中にキーボードを開閉するたびに見える範囲が飛ぶ。
+  updateMouseUI();
 }
 $("ovKbd").onclick = () => {
   if (stage.classList.contains("kbd-fs")) fsKbdOff(); else fsKbdOn();
 };
 window.addEventListener("resize", fsKbdMeasure);
 if (window.visualViewport) window.visualViewport.addEventListener("resize", fsKbdMeasure);
+
+// ================= OSキーボードのせり上がりを測る =================
+// スマホで文字入力を始めると、キーボードがせり上がって**実際に見えている領域が縮む**。
+// この縮みを勘定に入れないと、映像と入力欄を同時に画面へ置けない。
+//
+// 【dvh では測れない】`interactive-widget=resizes-content` を honor する環境では
+// レイアウトごと縮む(dvh も縮む)が、honor しない環境ではレイアウトは元の高さのまま
+// キーボードが**上に覆いかぶさる**だけになる。後者では dvh は1ピクセルも縮まないため、
+// dvh を基準に組むと入力欄が画面の外へ押し出される。
+// どちらの環境でも正しいのは visualViewport の実測値だけなので、それを唯一の基準にする。
+//
+//   --vvh … 実際に見えている高さ
+//   --kb  … 下からせり上がっている量(0 なら、レイアウトが縮んだ環境)
+//   .kb-up … キーボードが覆いかぶさっている(= バーがその裏に隠れる)
+// 文字を打てる要素にフォーカスがあるか。キーボードが出ているかの目安に使う。
+function kbFocused(){
+  const el = document.activeElement;
+  if (!el) return false;
+  if (el.tagName === "TEXTAREA") return true;
+  if (el.tagName !== "INPUT") return false;
+  return /^(text|search|url|tel|email|number|password)$/.test(el.type || "text");
+}
+function vvSync(){
+  const vv = window.visualViewport;
+  // 実際に見えている高さ。レイアウトの高さを超えることはあり得ないので下限を取る。
+  // レイアウトごと縮む環境では innerHeight だけが縮み、visualViewport.height が
+  // 追随しないことがある(縮む前の値を返し続ける)。その場合に古い値を掴むと、
+  // 映像を縮める計算が効かなくなる。
+  //
+  // 【0を書かないこと】visualViewport.height は、ページが背面にある間などに
+  // 0 を返すことがある。--vvh が 0px になると、これを高さに使っている
+  // 映像(キーボード表示中)と擬似全画面が**高さ0に潰れる**(実際に潰れた)。
+  // 正の値が取れないときは触らない。
+  const raw = vv && vv.height > 0 ? Math.round(vv.height) : 0;
+  const h = Math.min(window.innerHeight || raw, raw || window.innerHeight);
+  if (h <= 0) return; // まともな値が取れない。前の値を残す方が安全
+  // せり上がり量 = レイアウトの高さ - 実際に見えている範囲の下端。
+  // **覆いかぶさる環境でしか0より大きくならない**ことに注意。
+  const kb = vv ? Math.max(0, window.innerHeight - Math.round(vv.height + vv.offsetTop)) : 0;
+  // レイアウトごと縮む環境では kb が0のままなので、縮み幅そのものでも判定する。
+  // 基準はフォーカスが無い間だけ更新する(キーボードが出てから測ると縮みが0に見える)。
+  if (!kbFocused()) vvBase = h;
+  const shrink = Math.max(0, vvBase - h);
+  const st = document.documentElement.style;
+  st.setProperty("--vvh", h + "px");
+  st.setProperty("--kb", kb + "px");
+  // 可視領域が下へスクロールしている量。
+  // 【これを勘定に入れないと固定要素が画面外へ出る】iOSはキーボードを出すとき、
+  // レイアウトを縮めたうえで可視領域をスクロールさせる。position:fixed は
+  // レイアウト側に貼り付くため、そのぶん画面の上へはみ出す
+  // (実測: offsetTop=436 のとき擬似全画面が -436 の位置に居た)。
+  st.setProperty("--vvtop", (vv ? Math.max(0, Math.round(vv.offsetTop)) : 0) + "px");
+  // レイアウトの高さ。固定要素を「見えている帯の下端」に合わせるのに要る。
+  st.setProperty("--vh0", (window.innerHeight || h) + "px");
+  // 80px はキーボードとみなす下限。アドレスバーの伸縮(数十px)を拾わないため。
+  const up = kb > 80 || shrink > 80;
+  const was = document.body.classList.contains("kb-up");
+  document.body.classList.toggle("kb-up", up);
+  // 変わった瞬間だけ記録する(毎回出すとログが埋まる)
+  if (up !== was){
+    fsDiag(up ? "キーボードが出た" : "キーボードが引っ込んだ");
+    if (up) kbSettleScroll();
+  }
+}
+
+// キーボードが出た直後、深すぎるスクロールを戻す。
+//
+// 【なぜ要るか】フォーカスした瞬間はまだボタン群が出ており、ブラウザは
+// 「深い位置にある入力欄」を見せようと大きくスクロールする。そのあと
+// こちらがボタン群を畳んで全体が収まる高さになるが、**スクロール位置は
+// 深いまま残る**。実機では「2回目以降だけ下がりすぎる」形で表面化した
+// (1回目はページが先頭にあったため差が出なかった)。
+//
+// 【2回呼ぶ理由】キーボードは時間をかけて出てくる。出終わったあとに
+// ブラウザがもう一度スクロールすることがあるため、少し置いてもう一度戻す。
+function kbSettleScroll(){
+  const fix = () => {
+    try {
+      const doc = document.scrollingElement || document.documentElement;
+      const tp = $("tab-operate");
+      // 畳んだ結果すべて収まっているなら先頭へ。
+      // 収まっていない(横画面など畳まない構成)なら、ブラウザの判断を尊重して
+      // 入力欄が見える位置にあることだけ担保する。
+      const fits = doc.scrollHeight <= doc.clientHeight + 2;
+      if (fits){
+        doc.scrollTop = 0;
+        if (tp) tp.scrollTop = 0;
+        window.scrollTo(0, 0);
+      } else {
+        const t = $("kbdText");
+        if (t && document.activeElement === t) t.scrollIntoView({ block: "nearest" });
+      }
+    } catch(e){}
+  };
+  requestAnimationFrame(fix);
+  setTimeout(fix, 300);
+}
+vvSync();
+window.addEventListener("resize", vvSync);
+// フォーカスの出入りでも測り直す。レイアウトごと縮む環境では、
+// これが無いと「基準の高さ」を縮んだ後の値で上書きしてしまう。
+document.addEventListener("focusin", vvSync);
+document.addEventListener("focusout", () => setTimeout(vvSync, 50));
+if (window.visualViewport){
+  window.visualViewport.addEventListener("resize", vvSync);
+  window.visualViewport.addEventListener("scroll", vvSync); // 表示領域の移動でも測り直す
+}
 // 全画面を抜けたら入力エリアを元の場所へ戻す
 document.addEventListener("fullscreenchange", () => { if (!isFs()) fsKbdOff(); });
 document.addEventListener("webkitfullscreenchange", () => { if (!isFs()) fsKbdOff(); });
 
 function sendMouse(action, button){
+  if (action === "move" || action === "rmove") {
+    lastLocalMoveAt = Date.now();
+    // 「ここへ動かせ」と指示した位置を覚えておく(戻ってきた通知と区別するため)
+    try {
+      const vv = videoRect();
+      sentNX = vpx / vv.w; sentNY = vpy / vv.h;
+    } catch(e){}
+  }
   const v = videoRect();
   sendControl({ type:"mouse", action: action, button: button||"left", x: vpx/v.w, y: vpy/v.h });
 }
@@ -1233,9 +2566,19 @@ function sendClick(button){
   setTimeout(() => vptr.classList.remove("click","right"), 150);
 }
 
+// 映像上の物理マウスは initDirectInput() が down/up を直接送っている。
+// このトラックパッド用ハンドラでも同じイベントを拾うと、
+// 1回のクリックが「down+up」と「click」の**2回**送られてしまう(二重クリック)。
+// 映像(=.stage の中)かつ物理マウスかつ直接操作が有効なときは、ここでは何もしない。
+// トラックパッド(#pad)は .stage の外なので、マウスでなぞる操作は従来どおり効く。
+function dirOwnsPointer(el, ev){
+  return ev.pointerType === "mouse" && directEnabled() && stage.contains(el);
+}
+
 // 入力ハンドラを指定要素に取り付ける。activeFn が true のときだけ反応。
 function attachPointer(el, activeFn){
   el.addEventListener("pointerdown", (ev) => {
+    if (dirOwnsPointer(el, ev)) return; // 直接操作が担当(二重クリック防止)
     if (padTwoFinger) return; // パッド2本指スクロール中は通常のポインタ操作を止める
     if (ev.pointerType === "touch" && !ev.isPrimary) return; // 2本目以降の指はスクロール用(タップ扱いしない)
     if (!mouseEnabled() || !activeFn()) return;
@@ -1275,6 +2618,7 @@ function attachPointer(el, activeFn){
     }
   });
   el.addEventListener("pointermove", (ev) => {
+    if (dirOwnsPointer(el, ev)) return; // 直接操作が担当
     if (padTwoFinger) return;
     if (!mouseEnabled() || !tpActive || !activeFn()) return;
     const dx = (ev.clientX - tpLast.x) * SENS;
@@ -1287,13 +2631,35 @@ function attachPointer(el, activeFn){
     }
     vpx += dx; vpy += dy;
     clampPtr(); drawPtr();
-    // ドラッグ中は移動を随時サーバーへ送る(左ボタン押下のまま追従)。間引きする。
-    if (dragging) {
+    // 実カーソルを常に追従させる。
+    //
+    // 以前はドラッグ中(ボタンを押したまま)だけ送っていたため、
+    // 指を滑らせても**PC側のカーソルは動いていなかった**。
+    // そのため「乗せるだけで反応するUI」が反応せず、
+    // ウィンドウ端のサイズ変更カーソルもドラッグを始めるまで出なかった。
+    // 通常の移動でも送ることで、実際にカーソルが動いている状態にする。
+    {
       const now = Date.now();
       if (now - moveThrottle > 40) { moveThrottle = now; sendMouse("move"); }
     }
   });
+  // ブラウザが操作を取り上げたとき(端の引き出し・通知センター・ピンチなど)。
+  // pointerup は来ないので、ここで後始末しないとドラッグが解けず、
+  // サーバー側は左ボタンを押したままになる。クリックは送らない。
+  el.addEventListener("pointercancel", (ev) => {
+    if (dirOwnsPointer(el, ev)) return;
+    clearTimeout(lpTimer);
+    clearTimeout(dragArmTimer);
+    tpActive = false;
+    lpFired = false;
+    if (dragging) {
+      sendMouse("up", "left"); // 押しっぱなしを必ず解く
+      dragging = false;
+      vptr.classList.remove("drag");
+    }
+  });
   el.addEventListener("pointerup", (ev) => {
+    if (dirOwnsPointer(el, ev)) return; // 直接操作が担当(保留クリックを作らせない)
     if (padTwoFinger) return;
     if (!mouseEnabled() || !activeFn()) return;
     clearTimeout(lpTimer);
@@ -1360,20 +2726,46 @@ async function pollStats(){
   if (!pc || pc.connectionState !== "connected") { $("stats").textContent = "stats: —"; return; }
   try {
     const stats = await pc.getStats();
+    let bufV = null, bufA = null; // A/Vズレ計測用(受信バッファの厚みの差)
     const parts = [];
     let sel = null, locals = {}, remotes = {};
     stats.forEach(r => {
       if (r.type === "inbound-rtp" && (r.kind === "video" || r.kind === "audio")) {
+        // 音ズレの実体は「映像と音声で受信バッファの厚みが違うこと」。
+        // estimatedPlayoutTimestamp は基準が揃わず桁外れの差になるため使わない。
+        if (r.jitterBufferDelay && r.jitterBufferEmittedCount) {
+          const ms = r.jitterBufferDelay / r.jitterBufferEmittedCount * 1000;
+          if (r.kind === "video") bufV = ms; else if (r.kind === "audio") bufA = ms;
+        }
         const jb = (r.jitterBufferDelay && r.jitterBufferEmittedCount)
           ? Math.round(r.jitterBufferDelay / r.jitterBufferEmittedCount * 1000) : 0;
         const tag = r.kind === "video" ? "V" : "A";
         const res = (r.kind === "video" && r.frameWidth) ? ` ${r.frameWidth}x${r.frameHeight}` : "";
-        parts.push(`${tag}${res} buf:${jb}ms lost:${r.packetsLost||0}`);
+        // 映像はデコード遅れ(受信-デコード差)も出す。原因切り分けの材料になる。
+        let extra = "";
+        if (r.kind === "video" && r.framesReceived != null && r.framesDecoded != null) {
+          const undec = r.framesReceived - r.framesDecoded;
+          if (undec > 0) extra = ` undec:${undec}`;
+        }
+        parts.push(`${tag}${res} buf:${jb}ms lost:${r.packetsLost||0}${extra}`);
       }
       if (r.type === "candidate-pair" && (r.selected || r.nominated && r.state === "succeeded")) sel = r;
       if (r.type === "local-candidate") locals[r.id] = r;
       if (r.type === "remote-candidate") remotes[r.id] = r;
     });
+    // 映像と音声のズレ。
+    // 各ストリームの「再生時刻の推定値」の差を見る。
+    // 長時間つないでいると少しずつずれることがあるため、実測できるようにしておく。
+    // 正の値=音声が先行、負の値=映像が先行。
+    if (bufV != null && bufA != null) {
+      avSkewMs = bufV - bufA; // 正=映像が遅れている
+      const av = Math.round(avSkewMs);
+      if (Math.abs(av) >= 30) parts.push(`AVズレ:${av > 0 ? "映像+" : "音声+"}${Math.abs(av)}ms`);
+    }
+    // 経路の往復遅延(RTT)。ネットワーク自体の遅延の指標。
+    if (sel && sel.currentRoundTripTime != null) {
+      parts.push(`rtt:${Math.round(sel.currentRoundTripTime*1000)}ms`);
+    }
     // サーバーCPU使用率（control経由で受信した最新値）
     if (serverCPU >= 0) parts.push(`srvCPU:${Math.round(serverCPU)}%`);
     // 選択中の経路（どのIP/種別で繋がっているか）を表示
@@ -1387,24 +2779,214 @@ async function pollStats(){
 }
 setInterval(pollStats, 2000);
 
+// --- 遅延(ラグ)対策: ラグ解消ボタン / リアルタイムモード ---
+// 原因がサーバー側(エンコーダ/キュー肥大)かクライアント側(ジッタバッファ肥大)か
+// 特定できていないため、両方をリセットする。WebRTC接続は維持するので、
+// 再接続と違い再配信の視聴者・録画・認証に影響しない。
+let latencyMode = "smooth";
+let lastJitterMs = 0; // 直近の受信バッファ遅延(ランプの開始値に使う)
+
+// リアルタイム重視モードで維持する目標バッファ(ms)。
+// 0だと1パケットの遅れでも即カクつくため、わずかに持たせる方がなめらかで体感遅延も小さい。
+const RT_TARGET_MS = 60;
+
+let rampTimer = null;
+
+// ジッタバッファを「一気に捨てる」のではなく、目標値を段階的に下げて消化させる。
+// ブラウザは目標値に向けて再生間隔を詰める(音声は時間伸縮)ため、
+// 段階的に下げるとフレームを大量に捨てずに追いつける = 復帰がなめらかになる。
+function clearJitterBuffer(smooth){
+  if (!pc) return;
+  const recvs = pc.getReceivers();
+  const supported = recvs.some(r => "jitterBufferTarget" in r);
+
+  // 目標値まで滑らかに下げる。smooth=false(ボタン)なら短時間で、
+  // 自動解消(realtime)なら長めにして違和感を減らす。
+  const target = latencyMode === "realtime" ? RT_TARGET_MS : 0;
+  const steps  = smooth ? 8 : 3;
+  const every  = smooth ? 120 : 80;
+
+  // 現在値が取れないため、開始値は「溜まっている実測値」を使う
+  let cur = lastJitterMs > target ? lastJitterMs : target + 200;
+
+  if (rampTimer) { clearInterval(rampTimer); rampTimer = null; }
+  let i = 0;
+  const apply = (ms) => {
+    recvs.forEach(r => {
+      try { if ("jitterBufferTarget" in r) r.jitterBufferTarget = Math.max(0, ms); } catch(e){}
+      try { r.playoutDelayHint = Math.max(0, ms) / 1000; } catch(e){}
+    });
+  };
+  rampTimer = setInterval(() => {
+    i++;
+    const ms = cur + (target - cur) * (i / steps);
+    apply(ms);
+    if (i >= steps) {
+      clearInterval(rampTimer); rampTimer = null;
+      applyLatencyMode(); // 最終的にモードの通常値へ戻す
+    }
+  }, every);
+  apply(cur * 0.7); // 最初の一歩だけ即座に効かせる
+
+  // jitterBufferTarget が使えないブラウザ向けの保険。
+  // こちらは瞬間的に切り替わるため、使えない場合のみ実行する。
+  if (!supported) {
+    try {
+      const v = $("v");
+      if (v && v.srcObject) { const s = v.srcObject; v.srcObject = null; v.srcObject = s; }
+    } catch(e){}
+  }
+}
+
+function applyLatencyMode(){
+  if (!pc) return;
+  const realtime = latencyMode === "realtime";
+  pc.getReceivers().forEach(r => {
+    try {
+      // realtimeでも完全に0にはしない(0はカクつきの原因。わずかに持つ方が体感が良い)
+      if ("jitterBufferTarget" in r) r.jitterBufferTarget = realtime ? RT_TARGET_MS/1000 : null; // null=ブラウザ自動
+    } catch(e){}
+    try {
+      // buffer欄の明示指定があればそれを優先。無ければモードで決める。
+      const manual = +$("buffer").value;
+      r.playoutDelayHint = manual > 0 ? manual/1000 : (realtime ? RT_TARGET_MS/1000 : undefined);
+    } catch(e){}
+  });
+}
+
+// ラグ解消: クライアント側リセット + サーバー側パイプライン再起動
+// 直近に観測した映像と音声のバッファ差(ms)。正なら映像が遅れている。
+let avSkewMs = 0;
+
+// 映像と音声のズレを合わせ直す。
+//
+// ズレの実体は「映像と音声で受信バッファの厚みが違う」こと。
+// 厚い方に合わせると遅延が増えるので、**薄い方に寄せて**両者を揃える。
+// リアルタイム重視のときは両方を目標値まで下げる。
+function fixAVSync(){
+  if (!pc) return;
+  const recvs = pc.getReceivers();
+  const base = latencyMode === "realtime" ? RT_TARGET_MS : Math.max(0, Math.min(bufFloorMs(), 400));
+  recvs.forEach(r => {
+    try { if ("jitterBufferTarget" in r) r.jitterBufferTarget = base; } catch(e){}
+    try { r.playoutDelayHint = base / 1000; } catch(e){}
+  });
+  log("音ズレを合わせ直しました(目標 " + Math.round(base) + "ms)");
+  // 少し置いてから通常の設定へ戻す(realtimeは目標値を保つ)
+  setTimeout(applyLatencyMode, 1200);
+}
+// 合わせる基準にする厚み(薄い方)。極端に薄いと途切れるので下限を設ける。
+function bufFloorMs(){
+  const vals = [];
+  if (typeof lastJitterMs === "number" && lastJitterMs > 0) vals.push(lastJitterMs);
+  return vals.length ? Math.max(60, Math.min(...vals)) : 120;
+}
+if ($("avBtn")) $("avBtn").addEventListener("click", fixAVSync);
+
+// リアルタイム重視のときは、ズレが大きくなったら自動で合わせ直す。
+setInterval(() => {
+  if (!pc || latencyMode !== "realtime") return;
+  if (Math.abs(avSkewMs) > 250 && Date.now() - lastAvFix > 15000) {
+    lastAvFix = Date.now();
+    log("映像と音声のズレが大きいため自動で合わせます (" + Math.round(avSkewMs) + "ms)");
+    fixAVSync();
+  }
+}, 4000);
+let lastAvFix = 0;
+
+function doLagClear(){
+  clearJitterBuffer(false); // 手動は即効性を優先
+  try { sendControl({ type: "restart-pipeline" }); } catch(e){}
+  log("ラグ解消を実行しました(接続は維持)");
+}
+if ($("lockBtn")) $("lockBtn").addEventListener("click", () => {
+  try { sendControl({ type: "lock" }); log("画面ロックを送信"); } catch(e){}
+});
+if ($("sasBtn")) $("sasBtn").addEventListener("click", () => {
+  try { sendControl({ type: "sas" }); log("Ctrl+Alt+Del を送信"); } catch(e){}
+});
+if ($("lagBtn")) $("lagBtn").addEventListener("click", doLagClear);
+
+if ($("latencyMode")) $("latencyMode").addEventListener("change", () => {
+  latencyMode = $("latencyMode").value;
+  applyLatencyMode();
+  log("モード: " + (latencyMode === "realtime" ? "リアルタイム重視" : "動画視聴重視"));
+});
+
+// リアルタイムモードのときは、遅延が一定を超えたら自動でラグ解消する。
+let lastAutoLag = 0;
+async function autoLagWatch(){
+  if (!pc || pc.connectionState !== "connected" || latencyMode !== "realtime") return;
+  try {
+    const stats = await pc.getStats();
+    let jbMs = 0;
+    stats.forEach(r => {
+      if (r.type === "inbound-rtp" && r.kind === "video" && r.jitterBufferDelay && r.jitterBufferEmittedCount) {
+        jbMs = r.jitterBufferDelay / r.jitterBufferEmittedCount * 1000;
+        lastJitterMs = jbMs;
+      }
+    });
+    // 介入は控えめにする。
+    // 少し遅れただけで頻繁に手を入れると、そのたびに再生が乱れて逆効果になる。
+    // 目標値(60ms)からかなり離れた場合だけ、ゆっくり追いつかせる。
+    if (jbMs > 1200 && Date.now() - lastAutoLag > 20000) {
+      lastAutoLag = Date.now();
+      log("遅延が大きいため自動で追いつきます (" + Math.round(jbMs) + "ms)");
+      clearJitterBuffer(true); // 自動はなめらかさを優先
+    }
+  } catch(e){}
+}
+setInterval(autoLagWatch, 3000);
+
+// 直接操作の設定を保存・復元する
+if ($("directMouse")) {
+  const sv = localStorage.getItem("dss_direct_mouse");
+  if (sv !== null) $("directMouse").checked = (sv === "1");
+  $("directMouse").addEventListener("change", () => {
+    localStorage.setItem("dss_direct_mouse", $("directMouse").checked ? "1" : "0");
+    log("直接操作: " + ($("directMouse").checked ? "有効" : "無効"));
+  });
+}
+
+// 直接操作モードのイベント登録。
+// stage / vptr / vpx の宣言より後で呼ぶ必要があるため、ここで実行する。
+initDirectInput();
+
+
 // --- ピンチズーム(2本指) ---
-// 2本指ピンチで映像を拡大(1〜4倍)、2本指ドラッグでパン。1本指は従来のポインタ操作。
+// 2本指ピンチで映像を拡大(1〜4倍)。1本指は従来のポインタ操作。
 // 表示上のズーム(CSS transform)であり、マウス座標系には影響しない。
+//
+// 【2本指での画面移動は廃止した】利用者の指示による。
+// 代わりに、ズーム中の視野はポインタに追随する(zoomFollow)。
+// 指を平行移動しても視野は動かない。
+//
+// 【ズームの中心は最初に触った位置】その点が画面上で動かないように寄せる。
+// 以前は transform-origin が左上のままで、拡大するほど指の下の絵が
+// 左上へ逃げていく挙動だった。
 (function(){
   const stage = document.querySelector(".stage");
-  let zs = 1, ztx = 0, zty = 0, pinch = null;
-  function apply(){
-    const layer = document.getElementById("zoomLayer");
-    layer.style.transform = (zs > 1.01) ? `translate(${ztx}px, ${zty}px) scale(${zs})` : "";
-    $("zoomReset").classList.toggle("on", zs > 1.01); // ズーム中のみリセットを表示
-  }
-  $("zoomReset").onclick = () => { zs = 1; ztx = 0; zty = 0; apply(); };
+  let pinch = null;
+  $("zoomReset").onclick = () => {
+    zoomScale = 1; zoomTx = 0; zoomTy = 0;
+    zoomFollowedX = NaN; zoomFollowedY = NaN;
+    zoomApply(); drawPtr();
+  };
   const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   const mid  = (t) => ({ x: (t[0].clientX + t[1].clientX)/2, y: (t[0].clientY + t[1].clientY)/2 });
   stage.addEventListener("touchstart", (e) => {
     if (e.touches.length === 2) {
       e.preventDefault();
-      pinch = { d0: dist(e.touches), s0: zs, m0: mid(e.touches), tx0: ztx, ty0: zty };
+      const m = mid(e.touches);
+      const r = stage.getBoundingClientRect();
+      const mx = m.x - r.left, my = m.y - r.top; // #zoomLayer の座標へ直す
+      pinch = {
+        d0: dist(e.touches), s0: zoomScale, mx, my,
+        // いま触っている点が指している「拡大前の位置」。これを画面上に固定する。
+        px: (mx - zoomTx) / zoomScale,
+        py: (my - zoomTy) / zoomScale,
+      };
+      zoomPinching = true; // この間は追随より「触った点」を優先する
       // ピンチ開始でポインタ追跡を打ち切る(ズーム操作がポインタ移動・クリック・
       // ドラッグ発火として誤解釈されるのを防ぐ)。
       tpActive = false;
@@ -1415,14 +2997,29 @@ setInterval(pollStats, 2000);
   stage.addEventListener("touchmove", (e) => {
     if (pinch && e.touches.length === 2) {
       e.preventDefault();
-      zs = Math.min(4, Math.max(1, pinch.s0 * dist(e.touches) / pinch.d0));
-      const m = mid(e.touches);
-      if (zs > 1.01) { ztx = pinch.tx0 + (m.x - pinch.m0.x); zty = pinch.ty0 + (m.y - pinch.m0.y); }
-      else { ztx = 0; zty = 0; }
-      apply();
+      zoomScale = Math.min(4, Math.max(1, pinch.s0 * dist(e.touches) / pinch.d0));
+      if (zoomScale <= 1.01){
+        zoomScale = 1; zoomTx = 0; zoomTy = 0;
+      } else {
+        // 触った点を動かさない置き方。指の平行移動では動かない(パン廃止)。
+        zoomTx = pinch.mx - pinch.px * zoomScale;
+        zoomTy = pinch.my - pinch.py * zoomScale;
+        const layer = $("zoomLayer");
+        zoomClamp(layer.offsetWidth, layer.offsetHeight);
+      }
+      zoomApply();
+      drawPtr(); // ポインタは拡大しないので、位置だけ置き直す
     }
   }, { passive: false });
-  stage.addEventListener("touchend", (e) => { if (e.touches.length < 2) pinch = null; }, { passive: false });
+  stage.addEventListener("touchend", (e) => {
+    if (e.touches.length < 2){
+      pinch = null;
+      zoomPinching = false;
+      // 指を離した時点の位置を「追随済み」として覚える。
+      // こうしないと、次に drawPtr() が呼ばれた拍子に視野が引き戻される。
+      zoomFollowedX = vpx; zoomFollowedY = vpy;
+    }
+  }, { passive: false });
 })();
 
 updateMouseUI(); // 初期表示
@@ -1836,9 +3433,16 @@ function rsAddComment(c, roomNo){
   body.textContent = c.text; // textContentで挿入しHTMLとして解釈させない
   if (c.color && !c.host){ head.style.color = c.color; body.style.color = c.color; }
   div.appendChild(head); div.appendChild(body);
+  // 先頭付近を見ているときだけ最新へ追従する。
+  //
+  // 以前は無条件に scrollTop = 0 へ戻していた。コメントは新しいものが上に入るため、
+  // 過去のコメントを読もうとスクロールを下げている最中に誰かが発言すると、
+  // そのたび先頭へ引き戻されて読めなくなる。視聴者が多いほど頻発する。
+  // 判定は挿入の前に行う(挿入後はスクロール位置が動きうるため)。
+  const atTop = box.scrollTop < 40;
   box.insertBefore(div, box.firstChild); // 最新コメントを上に表示
   while (box.childElementCount > RS_MAX_COMMENTS) box.removeChild(box.lastChild);
-  box.scrollTop = 0;
+  if (atTop) box.scrollTop = 0;
 }
 
 // 視聴者の表示名。先行入室(名前入力前)は空文字なので「ユーザー名未入力」と表示する
@@ -2150,7 +3754,14 @@ function queueWheel(px){
   wheelTimer = setTimeout(() => {
     wheelTimer = null;
     const ticks = Math.trunc(wheelAcc / WHEEL_STEP);
-    if (ticks !== 0){ wheelAcc -= ticks * WHEEL_STEP; sendControl({ type: "wheel", dy: ticks }); }
+    if (ticks !== 0){
+      wheelAcc -= ticks * WHEEL_STEP;
+      // ホイールは「カーソルがある場所」に効く。
+      // 先に現在の仮想ポインタ位置を送ってから回すことで、
+      // 見ている位置のウィンドウがスクロールされるようにする。
+      try { sendMouse("move"); } catch(e){}
+      sendControl({ type: "wheel", dy: ticks });
+    }
   }, 40);
 }
 
@@ -2201,29 +3812,29 @@ pad.addEventListener("touchcancel", padTouchEnd);
 // 離すとつまみは中央へ戻る(Splashtopのスクロールバー相当)。
 // setPointerCapture が効かない環境でも動くよう、押下後は window で move/up を追跡する。
 (function(){
-  const wheel = $("fwheel"), thumb = $("fwThumb");
-  let active = false, lastY = 0, off = 0, pid = null;
+  const wheel = $("fwheel"); // つまみ(#fwThumb)は回転表現に変えたため使わない
+  let active = false, lastY = 0, spin = 0, pid = null;
   const move = (ev) => {
     if (!active || (pid !== null && ev.pointerId !== pid)) return;
     ev.preventDefault();
     const dy = ev.clientY - lastY;
     lastY = ev.clientY;
-    off = Math.max(-52, Math.min(52, off + dy));
-    thumb.style.marginTop = (off - 17) + "px";
+    // 溝を流して「回転している」ように見せる(つまみは動かさない)
+    spin += dy;
+    wheel.style.backgroundPositionY = spin + "px, 0px"; // 溝だけを流す(層は2つ)
     // スクロールバーの操作感: つまみを下へ = 画面を下へスクロール(=ホイールは負方向)
     queueWheel(-dy);
   };
   const end = (ev) => {
     if (!active || (pid !== null && ev.pointerId !== pid)) return;
     active = false; pid = null;
-    thumb.style.marginTop = "-17px";
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", end);
     window.removeEventListener("pointercancel", end);
   };
   wheel.addEventListener("pointerdown", (ev) => {
     ev.preventDefault(); ev.stopPropagation();
-    active = true; pid = ev.pointerId; lastY = ev.clientY; off = 0;
+    active = true; pid = ev.pointerId; lastY = ev.clientY;
     try { wheel.setPointerCapture(ev.pointerId); } catch(e){}
     window.addEventListener("pointermove", move, { passive: false });
     window.addEventListener("pointerup", end);
@@ -2262,11 +3873,11 @@ $("recBtn").onclick = () => {
   recorder.onstop = () => {
     dlBlob(new Blob(recChunks, { type: "video/webm" }), "dss_" + tsStamp() + ".webm");
     recorder = null; recChunks = [];
-    $("recBtn").textContent = "録画"; $("recBtn").classList.remove("rec-on");
+    $("recBtn").innerHTML = '<span class="bs">録画</span><span class="bl">⏺ 録画</span>'; $("recBtn").classList.remove("rec-on");
     log("録画を保存しました(webm)");
   };
   recorder.start(1000);
-  $("recBtn").textContent = "⏹録画中"; $("recBtn").classList.add("rec-on");
+  $("recBtn").innerHTML = '<span class="bs">録画中</span><span class="bl">⏹ 録画中</span>'; $("recBtn").classList.add("rec-on");
   log("録画を開始しました(この端末に保存されます。音声はミュート解除中のみ)");
 };
 
@@ -2294,6 +3905,44 @@ $("clipFromPc").onclick = async () => {
 
 // ================= リモートカーソル形状 =================
 // 状態色のリング(クリック=黄/右=青/ドラッグ=桃)は維持し、中央の形だけ変える。
+// PC側のカーソル実位置に、仮想ポインタを合わせる。
+//
+// クライアントは自分の操作量から仮想ポインタを描いているため、
+// PC側で人がマウスを動かした場合や、画面端で止まった場合にずれていく。
+// サーバーから届く実位置(モニタ内の0〜1)に追従させて一致させる。
+//
+// 自分が操作している最中に引き戻されるとガクつくので、
+// 直前に自分で動かした直後は無視する。
+let lastLocalMoveAt = 0;
+
+// こちらが最後に「ここへ動かせ」と送った位置(0〜1)。
+// サーバーから返ってくる実位置がこれとほぼ同じなら、それは自分の指示の反映(こだま)なので無視する。
+let sentNX = null, sentNY = null;
+
+// 仮想ポインタとPCの実ポインタの関係:
+//
+//   ・こちらが動かしたとき … **こちらが主**。実ポインタを仮想ポインタの位置へ動かす。
+//                            サーバーからの位置通知で引き戻してはいけない。
+//   ・PC側で人が動かしたとき … **PC側が主**。仮想ポインタをその位置へ合わせる。
+//
+// 両者を区別するために「自分が指示した位置」と比べる。
+// 差が小さければ自分の指示の反映、大きければPC側で動かされたと判断する。
+function syncPointerFromServer(nx, ny){
+  if (typeof nx !== "number" || typeof ny !== "number" || !pc) return;
+
+  // 自分が出した指示の反映なら何もしない(これをしないと操作するたびに引き戻される)
+  if (sentNX != null && Math.abs(nx - sentNX) < 0.02 && Math.abs(ny - sentNY) < 0.02) return;
+
+  // 直前まで自分で操作していた場合も、こちらを優先する
+  if (Date.now() - lastLocalMoveAt < 600) return;
+
+  const v = videoRect();
+  const tx = nx * v.w, ty = ny * v.h;
+  if (Math.hypot(tx - vpx, ty - vpy) < 3) return;
+  vpx = tx; vpy = ty;
+  drawPtr();
+}
+
 function setCursorKind(kind){
   const known = ["arrow","ibeam","hand","wait","cross","ns","we","nwse","nesw","all","no"];
   vptr.dataset.kind = known.includes(kind) ? kind : "arrow";
@@ -2377,7 +4026,9 @@ $("fileSend").addEventListener("change", async (e) => {
 });
 
 // ================= Wake on LAN =================
-$("wolMac").value = localStorage.getItem("dss_wol_mac") || "";
+// 値の保持は DSS_SETTINGS が受け持つ(入力しただけでも保存される)。
+// 送信時にも保存しているのは、入力直後にフォーカスを外さず押した場合に
+// change が出ないことがあるため。
 $("wolSend").onclick = () => {
   const mac = $("wolMac").value.trim();
   if (!/^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$/.test(mac)){ log("MACアドレスの形式が正しくありません"); return; }
@@ -2559,6 +4210,295 @@ $("rsDeskAudio").onclick = () => {
   rsLog(rsDeskAudioOn ? "PC音声を配信に含めます" : "PC音声を配信から外します");
 };
 rsUpdateDeskAudioBtn();
+
+
+// ===== 設定の保持 =====
+// 前回の値を localStorage に覚え、読み込み時に戻す。
+//
+// 【change を発火させない】値だけを戻す。発火させると読み込み時に
+// 再接続(p2p / コーデック / 画面)や権限要求(画面点灯)が勝手に走る。
+// 副作用が要るものは、戻したあとに個別で呼ぶ。
+//
+// 【選択肢が消えていたら戻さない】コーデックと画面はサーバーから受け取る。
+// 別のPCに繋いだ、GPUが変わった、モニタを外した、といった場合に
+// 存在しない値を選ぶと、そのまま Start して失敗する。
+function settingSave(id, key){
+  const el = $(id);
+  if (!el) return;
+  const isCheck = el.type === "checkbox";
+  el.addEventListener("change", () => {
+    try { localStorage.setItem(key, isCheck ? (el.checked ? "1" : "0") : el.value); } catch(e){}
+  });
+}
+function settingRestore(id, key){
+  const el = $(id);
+  if (!el) return false;
+  let v = null;
+  try { v = localStorage.getItem(key); } catch(e){}
+  if (v === null) return false;
+  if (el.type === "checkbox"){ el.checked = (v === "1"); return true; }
+  if (el.tagName === "SELECT"){
+    if (![...el.options].some(o => o.value === v)) return false; // 選択肢が無い
+    el.value = v; return true;
+  }
+  el.value = v;
+  return true;
+}
+function rememberSetting(id, key){ settingSave(id, key); return settingRestore(id, key); }
+
+// 保持する項目の一覧。
+// 【入れていないもの】文字入力欄・一斉送信・ファイル選択・視聴URLは
+// その場限りの入力なので保持しない。ショートカットの選択(#scSel)も保持しない —
+// 「Alt+F4」が選ばれた状態で復帰し、習慣で「キー送信」を押すと事故になるため。
+const DSS_SETTINGS = [
+  ["bitrate",      "dss_bitrate"],
+  ["mtu",          "dss_mtu"],
+  ["buffer",       "dss_buffer"],
+  ["latencyMode",  "dss_latency"],
+  ["p2p",          "dss_p2p"],
+  ["screenOn",     "dss_screen_on"],
+  ["kbdEnter",     "dss_kbd_enter"],
+  ["rsRooms",      "dss_rs_rooms"],
+  ["rsSource",     "dss_rs_source"],
+  // 【送信時だけの保存では足りなかった】以前は「送信」を押したときにしか
+  // 保存しておらず、入力しただけで再読み込みすると消えていた。
+  ["wolMac",       "dss_wol_mac"],
+  // サーバーから選択肢を受け取るものは、届いたあとで改めて戻す
+  ["codecSel",     "dss_codec"],
+  ["monSel",       "dss_monitor"],
+];
+for (const [id, key] of DSS_SETTINGS) rememberSetting(id, key);
+// 戻した値を実際の動作へ反映する(change を発火させない代わり)
+try { applyBuffer(); } catch(e){}
+try { latencyMode = $("latencyMode").value; } catch(e){}
+
+
+// ===== P2Pが通らない回線の検出 =====
+// 2つの見方を併用する。片方だけでは足りないため。
+//
+//   ① 対称型NATの検出 … **原因そのもの**を測る。キャリアに依存しないので
+//      楽天モバイル以外の同じ問題も拾える。ブラウザだけで完結する。
+//   ② 回線事業者の照会(RDAP) … 既知の回線を名指しできる。①が出ない場合の
+//      補強になる。JPNICの公開サービスを引くだけで、こちらでサーバーは持たない。
+//
+// 【なぜ逆引き(PTR)ではないのか】楽天モバイルのアドレスには**PTRレコードが無い**
+// (実機で確認済み)。引けないものは判定に使えない。
+//
+// 【TURNを置かない理由】中継サーバーを持つと維持費がかかる。利用者の判断で、
+// 「繋がるようにする」のではなく「繋がらないと分かるようにする」方針を採った。
+const NAT_STUN = [
+  "stun:stun.l.google.com:19302",
+  // 2つ目は**別のIPを持つサーバー**であること。同じ相手では対称型NATを判定できない。
+  "stun:stun1.l.google.com:19302",
+];
+let natSeen = new Map();  // 内側ポート -> 外から見えた外側ポートの集合
+let natPublicIp = "";     // 自分のグローバルIP(srflx候補から取れる。取得に外部APIは不要)
+let natWarned = false;
+
+// ICE候補を1つ受け取るたびに呼ぶ。
+function natNote(c){
+  try {
+    if (!c || c.type !== "srflx" || !c.address) return;
+    natPublicIp = natPublicIp || c.address;
+    // 【内側ポートで束ねられないことがある】relatedPort が 0 で返る実装があった(実測)。
+    // その場合は「外から見えたアドレス」で束ねる。
+    //   同じアドレスなのに外側ポートが複数 → 相手ごとに別の穴を開けている = 対称型NAT
+    //   アドレスが違う → 別の回線(Wi-Fiと携帯など)。混ぜて判定しない
+    const key = c.relatedPort ? ("p" + c.relatedPort) : ("a" + c.address);
+    if (!natSeen.has(key)) natSeen.set(key, new Set());
+    natSeen.get(key).add(c.port);
+  } catch(e){}
+}
+// 同じ内側ポートに対して外側ポートが2種類以上見えたら対称型NAT。
+// この形式では、中継(TURN)無しに直接つなぐ手段が無い。
+function natIsSymmetric(){
+  for (const ports of natSeen.values()) if (ports.size > 1) return true;
+  return false;
+}
+// 候補収集が終わった時点で判定する。
+async function natVerdict(){
+  if (natWarned) return;
+  let why = "";
+  if (natIsSymmetric()) why = "この回線は直接つながらない形式(対称型NAT)です";
+  else if (natPublicIp){
+    const carrier = await natLookupCarrier(natPublicIp);
+    if (carrier) why = carrier + " の回線です。直接つながらないことがあります";
+  }
+  if (!why) return;
+  natWarned = true;
+  natShowWarn(why);
+}
+// 回線事業者を調べる(RDAP)。
+//
+// 【エンドポイントを直接指定している理由】親の rdap.apnic.net はリダイレクトを挟み、
+// その途中でCORSに阻まれる(実測)。JPNICのサーバーを直接引くと通る。
+// 【引けなくてよい】日本以外のアドレスは404になる。その場合は何も言わない
+// (誤った警告を出すよりは黙る)。
+async function natLookupCarrier(ip){
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 4000);
+    const r = await fetch("https://jpnic.rdap.apnic.net/ip/" + encodeURIComponent(ip),
+                          { headers: { "Accept": "application/rdap+json" }, signal: ctl.signal });
+    clearTimeout(t);
+    if (!r.ok) return "";
+    const text = await r.text();
+    // 既知の「P2Pが通りにくい」回線。増やすときはここに足す。
+    if (/rakuten/i.test(text)) return "楽天モバイル";
+    return "";
+  } catch(e){ return ""; }
+}
+const NAT_HINT = "Wi-Fiに切り替えるか、別の回線をお試しください。";
+
+function natShowWarn(why){
+  const el = $("netWarn");
+  if (el){ el.textContent = "⚠ " + why + " " + NAT_HINT; el.style.display = ""; }
+  log("⚠ " + why);
+}
+
+// ================= バージョン表示 =================
+// クライアント自身のバージョン。**リリースのたびに手で上げること**。
+// リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
+// 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
+// サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
+const CLIENT_VERSION = "v0.7.0";
+(function(){
+  const o = $("verClient");
+  if (o) o.textContent = CLIENT_VERSION;
+  try { log("クライアント " + CLIENT_VERSION); } catch(e){}
+})();
+
+// ================= バックグラウンド動作(OSへの宣言方式) =================
+//
+// 【方針転換】以前は無音WAVをループ再生して「メディア再生中」とOSに誤認させていたが、
+// 実機で効かず、電池も使う。**OSに正式に申告する**方式へ切り替えた(無音WAVは削除済み)。
+//
+// 【このアプリ固有の制約】受信映像は muted で始まる。
+// 「音声ON」を押していない間は鳴っている音が1つも無く、宣言が正しくても
+// OSが維持すべきメディアが存在しない。バックグラウンド動作を効かせたいなら音声をONにすること。
+//
+// 【確認できていないこと】navigator.audioSession は iOS 専用で、
+// 開発環境(Windows)には存在しない。**実機でしか検証できない**。
+// そのため「いつ何が起きたか」を時刻付きでログに残す。背景に回っている間は
+// 画面が見えないので、その場の状態表示では確認手段にならない(これで一度失敗した)。
+(function(){
+  const hasAudioSession = ("audioSession" in navigator) && !!navigator.audioSession;
+  const hasMediaSession = "mediaSession" in navigator;
+  const hasWakeLock = "wakeLock" in navigator;
+
+  function ts(){
+    const d = new Date(), z = (n) => String(n).padStart(2, "0");
+    return z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds());
+  }
+  function blog(msg){ try { log(ts() + " [バックグラウンド] " + msg); } catch(e){} }
+  function setState(t){ const o = $("bgKeepState"); if (o) o.textContent = t; }
+
+  function connState(){
+    try { return pc ? pc.connectionState : "未接続"; } catch(e){ return "不明"; }
+  }
+  function audible(){
+    // 受信映像が消音のままなら、OSから見て維持すべき音が無い
+    try { const v = $("v"); return !!(v && !v.muted && v.srcObject); } catch(e){ return false; }
+  }
+
+  // ---- 1. Audio Session の宣言 ----
+  // 通常は再生のみ。再配信でマイクを使っている間だけ録音も申告する。
+  function desiredType(){
+    try { return rsMicTrack ? "play-and-record" : "playback"; } catch(e){ return "playback"; }
+  }
+  function declare(){
+    if (!hasAudioSession) return;
+    const want = desiredType();
+    try {
+      if (navigator.audioSession.type !== want){
+        navigator.audioSession.type = want;
+        blog("宣言を更新: " + want);
+      }
+    } catch(e){ blog("宣言に失敗: " + (e && e.name ? e.name : e)); }
+  }
+
+  // ---- 2. 割り込みからの復帰 ----
+  // 通話・Siri・アラームで中断されたあと、能動的に鳴らし直す。
+  function recover(why){
+    try { if (rsAudioCtx && rsAudioCtx.state === "suspended") rsAudioCtx.resume(); } catch(e){}
+    document.querySelectorAll("video, audio").forEach((m) => {
+      try { if (m.paused && m.srcObject) m.play().catch(() => {}); } catch(e){}
+    });
+    declare();
+    blog("復帰(" + why + "): 接続=" + connState() + " 音声=" + (audible() ? "あり" : "消音"));
+    setState("動作中 / 接続=" + connState());
+  }
+
+  if (hasAudioSession) {
+    try {
+      navigator.audioSession.onstatechange = () => {
+        const st = navigator.audioSession.state;
+        blog("セッション状態: " + st);
+        if (st === "interrupted") setState("割り込み中(通話・Siriなど)");
+        else if (st === "active") recover("割り込み解除");
+      };
+    } catch(e){ blog("状態監視を登録できません: " + e); }
+  }
+
+  // ---- 3. Media Session ----
+  // ロック画面に動作中であることを出す。停止操作は「維持」に読み替える。
+  if (hasMediaSession) {
+    try {
+      if (window.MediaMetadata) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: "DesktopStream", artist: "リモート操作中"
+        });
+      }
+      navigator.mediaSession.playbackState = "playing";
+      const keep = () => {
+        try { navigator.mediaSession.playbackState = "playing"; } catch(e){}
+        blog("ロック画面の操作を受けましたが、維持しました");
+      };
+      navigator.mediaSession.setActionHandler("pause", keep);
+      navigator.mediaSession.setActionHandler("play", keep);
+    } catch(e){ blog("Media Session を設定できません: " + e); }
+  }
+
+  // ---- 4. 画面常時点灯(設定) ----
+  let wl = null;
+  async function acquireWake(){
+    const c = $("screenOn");
+    if (!hasWakeLock || !c || !c.checked || document.hidden) return;
+    if (wl) return;
+    try {
+      wl = await navigator.wakeLock.request("screen");
+      wl.addEventListener("release", () => { wl = null; blog("画面常時点灯が解放されました"); });
+      blog("画面常時点灯: 取得");
+    } catch(e){ blog("画面常時点灯: 取得できません " + (e && e.name ? e.name : e)); }
+  }
+  function releaseWake(){
+    try { if (wl) wl.release(); } catch(e){}
+    wl = null;
+  }
+  if ($("screenOn")) $("screenOn").addEventListener("change", () => {
+    if ($("screenOn").checked) acquireWake(); else { releaseWake(); blog("画面常時点灯: 解除"); }
+  });
+
+  // ---- 保険: フォアグラウンド復帰時にも同じ復帰処理を通す ----
+  // statechange が来ない環境でも、画面を戻せば復旧する。
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      blog("バックグラウンドへ移行: 接続=" + connState() + " 音声=" + (audible() ? "あり" : "消音")
+           + (audible() ? "" : " ※消音のままだと維持できません"));
+    } else {
+      recover("フォアグラウンド復帰");
+      acquireWake();
+    }
+  });
+
+  // 起動時に一度宣言し、状態を出す
+  declare();
+  setState(hasAudioSession ? "宣言済み(" + desiredType() + ")"
+                           : "この端末はAudio Session非対応(iOS以外)");
+  blog("開始: audioSession=" + hasAudioSession + " mediaSession=" + hasMediaSession
+       + " wakeLock=" + hasWakeLock);
+  acquireWake();
+})();
 
 </script>
 </body>
