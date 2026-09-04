@@ -776,7 +776,7 @@
 <body>
 <header>
   <span id="dot" class="dot"></span>
-  <h1>DESKTOP STREAM (REMOTE)</h1>
+  <h1>DESKTOP STREAM</h1>
   <span id="state" aria-live="polite">disconnected</span>
   <button id="reconnBtn" class="hdr-btn">再接続</button>
 </header>
@@ -1157,6 +1157,9 @@ let phaseT0 = 0;            // 計測の起点(performance.now())
 // 「原因は分からないが速くしたい」を安全に満たせる。
 const DIRECT_START_WAIT = 5000; // 直送してから映像を待つ時間(ms)
 let directWatch = null;         // ②の見張り(タイマーの組)
+// 【撤退経路】?direct=0 を付けると、以前と同じ「必ず張り直してから Start」に戻る。
+// 直送が原因かどうかを、利用者の手元で1操作で切り分けられるようにするため。
+const DIRECT_START_OK = new URLSearchParams(location.search).get("direct") !== "0";
 let roomId = localStorage.getItem("dss_room") || ""; // ルームID(保存して再利用)
 let waitTimer = null; // サーバー不在検出用(入室後offerが来ない場合の案内)
 
@@ -1209,10 +1212,21 @@ function watchFirstVideo(canFallback){
   st.timer = setTimeout(() => {
     clearInterval(st.iv);
     if (directWatch === st) directWatch = null;
-    if (!canFallback) { log("[計測] " + (DIRECT_START_WAIT / 1000) + "秒たっても映像が出ていません"); return; }
+    // 出なかったときの手がかりを残す。映像トラックがそもそも無いのか、
+    // 届いているのに描けていないのかで、次に見る場所が変わる。
+    let d = "";
+    try {
+      const t = (video.srcObject ? video.srcObject.getVideoTracks() : []) || [];
+      d = " (映像トラック=" + t.length +
+          (t[0] ? " muted=" + t[0].muted + " state=" + t[0].readyState : "") +
+          " 解像度=" + video.videoWidth + "x" + video.videoHeight +
+          " readyState=" + video.readyState + " paused=" + video.paused + ")";
+    } catch(e){}
+    log("[計測] " + (DIRECT_START_WAIT / 1000) + "秒たっても映像が出ていません" + d);
+    if (!canFallback) return;
     // 【フォールバック】直送では駄目な条件が過去にあった(詳細が残っていない)。
     // ここで従来の経路に落ちるので、条件が何であっても最終的には配信が始まる。
-    log("直送では映像が出ませんでした → 接続を張り直します");
+    log("→ 接続を張り直します(直送では映像が出ませんでした)");
     pendingStart = true;
     reconnect();
   }, DIRECT_START_WAIT);
@@ -1251,6 +1265,11 @@ function updateRoomState(){
 const AYAME_URL = "wss://ayame-labo.shiguredo.app/signaling";
 
 function connect() {
+  // 【ここにも起点を置く理由】読み込み直後の初回接続は reconnect() を通らない。
+  // reconnect() にしか起点が無かったため、初回は phaseT0 が 0 のままで
+  // phase() が黙って返り、`[計測]` の行が1行も出ていなかった(実測で判明)。
+  // 張り直し経由のときは reconnect() が直前に置き直すので、上書きにはならない。
+  if (!phaseT0) phaseStart("接続を開始");
   if (!roomId) { setState("no room", "warn"); log("ルームIDを設定してください"); return; }
   ws = new WebSocket(AYAME_URL);
   ws.onopen  = () => {
@@ -2013,14 +2032,17 @@ $("start").onclick = () => {
   // 張り直しの固定待ちと、ICE/DTLS/認証のやり直しを丸ごと省ける。
   // 判定は autoHealthy() を使い回す(経路が張れていて制御チャネルが開いている)。
   // ボタンが押せている時点で認証は通っているので、これで足りる。
-  if (autoHealthy()) {
+  if (DIRECT_START_OK && autoHealthy()) {
     phaseStart("Start(直送)");
     log("start -> 直送(接続を維持したまま)");
     sendStartNow(true);   // 映像が出なければ、この中から張り直しへ落ちる
     return;
   }
   pendingStart = true;
-  log("start -> reconnect");
+  // なぜ張り直したのかを残す。「遅い」と言われたときに、直送を使えなかったのか
+  // 使ったうえで遅いのかを、ログだけで区別できるようにする。
+  log("start -> reconnect (" + (!DIRECT_START_OK ? "直送を無効化(?direct=0)"
+      : "接続が健全でない") + ")");
   reconnect(); // 再接続後、control open で自動的に start を送る
 };
 // 音声のオン/オフは「音声ON/OFF」ボタンのみで行う(映像タップでは切り替えない)。
@@ -4490,7 +4512,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.3";
+const CLIENT_VERSION = "v0.7.4";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
