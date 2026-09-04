@@ -31,6 +31,9 @@
     border-bottom: 1px solid #1e242b; background: #11151a;
   }
   header h1 { font-size: 13px; font-weight: 700; letter-spacing: .08em; color: #cfd6dd; }
+  /* 版の表示。狭い画面では真っ先に消してよい情報なので、詰まったら隠す。 */
+  #verClient { font-size: 11px; color: #6b7684; flex: none; }
+  @media (max-width: 420px) { #verClient { display: none; } }
   #dot { width: 10px; height: 10px; border-radius: 50%; background: #555; flex: none; }
   #dot.ok { background: #2ecf8e; } #dot.warn { background: #e8b93c; } #dot.err { background: #e05252; }
   #status { font-size: 12px; color: #9aa4b0; margin-left: auto; text-align: right; }
@@ -211,6 +214,8 @@
 <header>
   <span id="dot"></span>
   <h1>DESKTOP STREAM 視聴</h1>
+  <!-- 版の表示。不具合報告のとき「どの版か」を利用者の画面だけで判別するために出す。 -->
+  <span id="verClient" title="クライアントのバージョン">-</span>
   <span id="status" role="status" aria-live="polite">準備中…</span>
 </header>
 
@@ -263,6 +268,18 @@
 "use strict";
 const AYAME_URL = "wss://ayame-labo.shiguredo.app/signaling";
 const $ = (id) => document.getElementById(id);
+
+// ================= バージョン表示 =================
+// このクライアント自身の版。**リリースのたびに手で上げること**。
+// GitHub Pages から配信されるため、配信元(exe)や操作クライアントとは
+// 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
+// 操作クライアント2種(web/index.html, ayame-client/client.html)の
+// CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
+const CLIENT_VERSION = "v0.7.0";
+(function(){
+  const o = $("verClient");
+  if (o) o.textContent = CLIENT_VERSION;
+})();
 const video = $("player");
 
 // ---- URLクエリから ベースID と 部屋数 を割り出す ----
