@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='%232ecf8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E %3Crect x='2' y='3' width='20' height='14' rx='2'/%3E %3Cpath d='M12 17v3M8 20h8'/%3E %3Cpath d='M4 4l7.07 17 2.51-7.39L21 11.06z' fill='%232ecf8e' stroke='none' transform='translate(6.8 3.8) scale(0.5)'/%3E %3C/svg%3E" />
 <title>Desktop Stream — 視聴</title>
 <style>
   /* 再配信の視聴専用クライアント。
@@ -12,7 +13,12 @@
   html, body { height: 100%; }
   body {
     background: #0d1116; color: #e6e8ea;
-    font-family: "SF Mono", "Cascadia Code", Consolas, "Noto Sans Mono CJK JP", monospace;
+    /* この画面に出るのは視聴者が書いたコメントと名前、つまり普通の文章である。
+       操作クライアント2種の等幅指定はログ・IPアドレス・鍵指紋を読むためのもので、
+       ここには当てはまらない。あえて揃えず、読みやすいシステムフォントを使う。
+       (旧指定のCJKフォールバック "Noto Sans Mono CJK JP" は iOS にも標準の Windows にも
+        入っておらず、肝心の日本語コメントには実質適用されていなかった) */
+    font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif;
     height: 100vh; height: 100dvh;
     display: flex; flex-direction: column; overflow: hidden;
   }
@@ -48,7 +54,6 @@
     cursor: pointer; touch-action: manipulation; display: none;
   }
   #unmute.on { display: inline-block; }
-  #unmute:active { background: #232c36; }
   #retry {
     position: absolute; left: 50%; top: 62%; transform: translate(-50%,-50%);
     padding: 10px 16px; font: inherit; font-size: 13px; color: #e6e8ea;
@@ -79,6 +84,12 @@
   .cm { font-size: 13px; line-height: 1.5; word-break: break-word; }
   .cm .meta { color: #7f8b98; margin-right: 6px; font-size: 11px; }
   #cmForm { display: flex; gap: 6px; flex: none; }
+  /* P2Pが通らない回線の警告。既定は非表示で、検出したときだけ出す。 */
+  #netWarn {
+    flex: none; padding: 8px 10px; margin-bottom: 6px; border-radius: 8px;
+    font-size: 13px; color: #ffd6a5;
+    background: rgba(120,70,0,.35); border: 1px solid rgba(255,170,60,.45);
+  }
   #cmColor {
     width: 44px; height: 44px; flex: none; padding: 2px;
     background: #0d1116; border: 1px solid #2a323b; border-radius: 8px; cursor: pointer;
@@ -97,7 +108,6 @@
     cursor: pointer; touch-action: manipulation;
   }
   #cmSend:disabled, #cmText:disabled { opacity: .45; }
-  #cmSend:active:not(:disabled) { background: #234a3a; }
 
   /* 縦画面: プレーヤー高さを画面の42%までに抑える。
      キーボード表示時は interactive-widget=resizes-content により dvh が縮むため、
@@ -143,7 +153,7 @@
     position: absolute; top: 8px; right: 8px; z-index: 5; display: none;
     min-height: 36px; padding: 6px 12px; font: inherit; font-size: 13px; color: #e6e8ea;
     background: rgba(13,17,22,.72); border: 1px solid rgba(58,68,80,.85); border-radius: 6px;
-    cursor: pointer; touch-action: manipulation; backdrop-filter: blur(2px);
+    cursor: pointer; touch-action: manipulation;
   }
   .stage:fullscreen #fsExit { display: block; }
   .stage:-webkit-full-screen #fsExit { display: block; }
@@ -184,7 +194,16 @@
     background: #1c3a2e; color: #dff3e8; border: 1px solid #2f5a46; border-radius: 8px;
     cursor: pointer; touch-action: manipulation;
   }
-  #ngGo:active { background: #234a3a; }
+  /* 押した瞬間の反応。
+     このファイルは * に -webkit-tap-highlight-color: transparent を掛けて
+     OS標準のタップ反応を消しているため、これが無いとスマホで
+     「押せたのかどうか」が全く分からない要素ができる(実際に
+     全画面・再検索・アイコン選択などが無反応だった)。
+     背景色はボタンごとに違うので、色を決め打ちせず明度で反応させる。
+     個別の :active を足していく方式は取りこぼすため、1ルールで全ボタンを覆う。 */
+  button:active:not(:disabled) { filter: brightness(1.35); }
+  /* キーボードのフォーカス位置を必ず見えるようにする(:focus ではなく :focus-visible)。 */
+  :focus-visible { outline: 2px solid #36d399; outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -220,6 +239,8 @@
     <button id="retry">↻ もう一度さがす</button>
   </div>
   <div id="cmWrap">
+    <!-- P2Pが通らない回線を検出したときだけ出る。既定は非表示。 -->
+    <div id="netWarn" style="display:none"></div>
     <div id="vrow">
       <span class="volgrp"><span class="vlabel">🎬動画</span><input id="volDesk" type="range" min="0" max="100" value="30" aria-label="動画音声の音量" /></span>
       <button id="unmute">🔇 音声ON</button>
@@ -382,9 +403,95 @@ function tuneOpus(sdp){
   return sdp;
 }
 
+
+// ===== P2Pが通らない回線の検出 =====
+// 2つの見方を併用する。片方だけでは足りないため。
+//
+//   ① 対称型NATの検出 … **原因そのもの**を測る。キャリアに依存しないので
+//      楽天モバイル以外の同じ問題も拾える。ブラウザだけで完結する。
+//   ② 回線事業者の照会(RDAP) … 既知の回線を名指しできる。①が出ない場合の
+//      補強になる。JPNICの公開サービスを引くだけで、こちらでサーバーは持たない。
+//
+// 【なぜ逆引き(PTR)ではないのか】楽天モバイルのアドレスには**PTRレコードが無い**
+// (実機で確認済み)。引けないものは判定に使えない。
+//
+// 【TURNを置かない理由】中継サーバーを持つと維持費がかかる。利用者の判断で、
+// 「繋がるようにする」のではなく「繋がらないと分かるようにする」方針を採った。
+const NAT_STUN = [
+  "stun:stun.l.google.com:19302",
+  // 2つ目は**別のIPを持つサーバー**であること。同じ相手では対称型NATを判定できない。
+  "stun:stun1.l.google.com:19302",
+];
+let natSeen = new Map();  // 内側ポート -> 外から見えた外側ポートの集合
+let natPublicIp = "";     // 自分のグローバルIP(srflx候補から取れる。取得に外部APIは不要)
+let natWarned = false;
+
+// ICE候補を1つ受け取るたびに呼ぶ。
+function natNote(c){
+  try {
+    if (!c || c.type !== "srflx" || !c.address) return;
+    natPublicIp = natPublicIp || c.address;
+    // 【内側ポートで束ねられないことがある】relatedPort が 0 で返る実装があった(実測)。
+    // その場合は「外から見えたアドレス」で束ねる。
+    //   同じアドレスなのに外側ポートが複数 → 相手ごとに別の穴を開けている = 対称型NAT
+    //   アドレスが違う → 別の回線(Wi-Fiと携帯など)。混ぜて判定しない
+    const key = c.relatedPort ? ("p" + c.relatedPort) : ("a" + c.address);
+    if (!natSeen.has(key)) natSeen.set(key, new Set());
+    natSeen.get(key).add(c.port);
+  } catch(e){}
+}
+// 同じ内側ポートに対して外側ポートが2種類以上見えたら対称型NAT。
+// この形式では、中継(TURN)無しに直接つなぐ手段が無い。
+function natIsSymmetric(){
+  for (const ports of natSeen.values()) if (ports.size > 1) return true;
+  return false;
+}
+// 候補収集が終わった時点で判定する。
+async function natVerdict(){
+  if (natWarned) return;
+  let why = "";
+  if (natIsSymmetric()) why = "この回線は直接つながらない形式(対称型NAT)です";
+  else if (natPublicIp){
+    const carrier = await natLookupCarrier(natPublicIp);
+    if (carrier) why = carrier + " の回線です。直接つながらないことがあります";
+  }
+  if (!why) return;
+  natWarned = true;
+  natShowWarn(why);
+}
+// 回線事業者を調べる(RDAP)。
+//
+// 【エンドポイントを直接指定している理由】親の rdap.apnic.net はリダイレクトを挟み、
+// その途中でCORSに阻まれる(実測)。JPNICのサーバーを直接引くと通る。
+// 【引けなくてよい】日本以外のアドレスは404になる。その場合は何も言わない
+// (誤った警告を出すよりは黙る)。
+async function natLookupCarrier(ip){
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 4000);
+    const r = await fetch("https://jpnic.rdap.apnic.net/ip/" + encodeURIComponent(ip),
+                          { headers: { "Accept": "application/rdap+json" }, signal: ctl.signal });
+    clearTimeout(t);
+    if (!r.ok) return "";
+    const text = await r.text();
+    // 既知の「P2Pが通りにくい」回線。増やすときはここに足す。
+    if (/rakuten/i.test(text)) return "楽天モバイル";
+    return "";
+  } catch(e){ return ""; }
+}
+const NAT_HINT = "Wi-Fiに切り替えるか、別の回線をお試しください。";
+function natShowWarn(why){
+  const el = document.getElementById("netWarn");
+  if (el){ el.textContent = "⚠ " + why + " " + NAT_HINT; el.style.display = ""; }
+}
+
 async function startPeer(){
-  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-  pc.onicecandidate = (e) => { if (e.candidate && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "candidate", ice: e.candidate })); };
+  pc = new RTCPeerConnection({ iceServers: [{ urls: NAT_STUN }] });
+  pc.onicecandidate = (e) => {
+    if (!e.candidate) { natVerdict(); return; } // 候補収集の完了
+    natNote(e.candidate);                        // P2Pが通らない回線かの判定材料
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "candidate", ice: e.candidate }));
+  };
   pc.ontrack = (e) => {
     if (e.track.kind === "video"){
       // 映像だけをvideo要素へ。音声はWeb Audio側で個別に鳴らす(音量バランス用)。
@@ -588,9 +695,16 @@ function addComment(name, text, ts, color, icon, host){
   body.textContent = text; // textContentで挿入(HTMLとして解釈させない)
   if (!host && /^#[0-9a-fA-F]{6}$/.test(color || "")){ meta.style.color = color; body.style.color = color; }
   div.appendChild(meta); div.appendChild(body);
+  // 先頭付近を見ているときだけ最新へ追従する。
+  //
+  // 以前は無条件に scrollTop = 0 へ戻していた。コメントは新しいものが上に入るため、
+  // 過去のコメントを読もうとスクロールを下げている最中に誰かが発言すると、
+  // そのたび先頭へ引き戻されて読めなくなる。視聴者が多いほど頻発する。
+  // 判定は挿入の前に行う(挿入後はスクロール位置が動きうるため)。
+  const atTop = box.scrollTop < 40;
   box.insertBefore(div, box.firstChild); // 最新コメントを上に表示
   while (box.childElementCount > 200) box.removeChild(box.lastChild);
-  box.scrollTop = 0;
+  if (atTop) box.scrollTop = 0;
 }
 function sendComment(){
   const text = $("cmText").value.trim();
