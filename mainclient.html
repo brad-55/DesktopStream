@@ -530,6 +530,20 @@
      文字入力中の #kbd を巻き込まないよう、コンテナは行(.controls / .sc-row)に限定すること。
      #rightcol や #tab-operate に付けると、浮かせているバーが固定されなくなる。 */
   #tab-operate .bl { display: none; }
+  /* 状態を示す小さな札(トグル表示)。
+     「押すとどうなるか」ではなく**いまどうなっているか**を示す。
+     以前は絵柄が状態、文言が動作を指していて、同じボタンの中で意味が逆を向いていた。
+     色だけに頼らず ON / OFF の文字を必ず入れる(白黒表示や色覚差でも読めるように)。 */
+  .sw {
+    display: inline-block; margin-left: 4px; padding: 0 5px;
+    border-radius: var(--r-pill); font-size: 10px; font-weight: 700;
+    line-height: 15px; vertical-align: 1px;
+    background: #48484a; color: var(--label);
+  }
+  .sw.on { background: var(--tint); color: #06240f; }
+  /* 狭いときは札を出さない。短い文言(.bs)側が「音ON」「音OFF」で状態を持つため、
+     札を足すと**列の幅を押し上げるだけ**になる。切り替え方は .bl と同じにしてある。 */
+  #tab-operate .sw { display: none; }
   #tab-operate .controls, #tab-operate .sc-row { container-type: inline-size; }
   /* 画面/入力のプルダウンは必ず横に並べる。
      flex + wrap のままだと、選択肢の文字が長い環境(iOSのselectは装飾のぶん幅を食う)で
@@ -580,6 +594,7 @@
   @container (min-width: 335px) {
     #tab-operate .primary-controls .bs { display: none; }
     #tab-operate .primary-controls .bl { display: inline; }
+    #tab-operate .primary-controls .sw { display: inline-block; }
     /* 【左右の余白を詰める理由】列が等幅なので、一番長い文言(「🔊 音ズレ解消」)が
        基準になる。余白6pxのままだと1個あたり88px必要で、4等分には370px要る。
        iPhone相当の行幅は351pxなので入らない。
@@ -735,7 +750,7 @@
     <div class="hint" id="hint">Start で配信開始</div>
     <div class="stage-ov">
       <button id="ovKbd" aria-label="文字入力の表示切り替え">⌨</button>
-      <button id="ovMute">🔇 音声ON</button>
+      <button id="ovMute" aria-pressed="false">🔇 音声<span class="sw">OFF</span></button>
       <button id="ovFs" aria-label="全画面切り替え">⛶</button>
     </div>
     <button id="zoomReset">1×に戻す</button>
@@ -765,7 +780,7 @@
     <!-- 操作タブ -->
     <div class="tabpage active" id="tab-operate">
       <div class="controls primary-controls">
-        <button id="unmute" title="音声ON"><span class="bs">音声</span><span class="bl">🔇 音声ON</span></button>
+        <button id="unmute" title="音声OFF" aria-pressed="false"><span class="bs">音OFF</span><span class="bl">🔇 音声</span><span class="sw">OFF</span></button>
         <button id="fsBtn" title="全画面"><span class="bs">全画面</span><span class="bl">⛶ 全画面</span></button>
         <button id="lagBtn" title="接続を保ったまま映像の遅延をリセットします"><span class="bs">ラグ</span><span class="bl">⚡ ラグ解消</span></button>
         <button id="avBtn" title="映像と音声のズレを合わせ直します"><span class="bs">音ズレ</span><span class="bl">🔊 音ズレ解消</span></button>
@@ -1050,7 +1065,81 @@ let zoomCx = 0.5, zoomCy = 0.5;
 // 追随を走らせると、ピンチで決めた視野を勝手に引き戻してしまう。
 let zoomFollowedX = NaN, zoomFollowedY = NaN;
 
+// --- 接続の所要時間の計測 ---
+// 【ここで宣言している理由】phase() は connect() の途中や ontrack から呼ぶ。
+// 関数の隣(ファイル後方)で宣言すると「宣言より前の参照」になり、
+// TDZ違反でスクリプト全体が止まる(過去に2度踏んだ地雷)。
+let phaseT0 = 0;            // 計測の起点(performance.now())
+
+// --- Start の直送と、その見張り ---
+// 【なぜ二段構えなのか】以前は Start のたびに接続を張り直していた。
+// 「Startだけでは上手くいかない場合がある」ことは分かっているが、
+// **どの条件だったかの記録が残っていない**。そこで
+//   ① 接続が健全なら start だけ送る(張り直しの数秒を省ける)
+//   ② 一定時間たっても映像が出なければ、従来どおり張り直す
+// とする。忘れている条件が何であっても②で回収できるので、
+// 「原因は分からないが速くしたい」を安全に満たせる。
+const DIRECT_START_WAIT = 5000; // 直送してから映像を待つ時間(ms)
+let directWatch = null;         // ②の見張り(タイマーの組)
+
 function log(...a){ const el=$("log"); el.textContent += a.join(" ")+"\n"; el.scrollTop=el.scrollHeight; }
+
+// ================= 接続の所要時間の計測 =================
+// 「接続してからStartが押せるまで」と「Startから映像が出るまで」を縮めるための材料。
+// どの段が重いかは環境で変わるため、推測で削らず**実測をログに残す**。
+// 利用者から送られたログだけで内訳が読めるように、1行1段で出す。
+function phaseStart(why){ phaseT0 = performance.now(); log("[計測] 0ms " + why); }
+function phase(name){
+  if (!phaseT0) return;
+  log("[計測] +" + Math.round(performance.now() - phaseT0) + "ms " + name);
+}
+
+// start を送る本体。押した直後の画面状態の変更もここへ集める
+// (直送と張り直し後の自動開始で、同じ内容を二重に書かないため)。
+// canFallback: 直送のときだけ真。映像が出なければ張り直す。
+function sendStartNow(canFallback){
+  sendControl({ type: "start", bitrate: +$("bitrate").value, codec: currentCodec, mtu: +$("mtu").value, monitor: parseInt($("monSel").value, 10) });
+  $("hint").style.display = "none";
+  $("start").disabled = true; $("stop").disabled = false;
+  phase("start送信");
+  watchFirstVideo(canFallback);
+}
+
+// 見張りを解除する。Stop と 張り直しの両方から呼ぶ。
+// 【解除し忘れると何が起きるか】Start の直後に Stop を押した場合、
+// 映像が出ないのは当然なのに「出なかった」と見なして勝手に繋ぎ直してしまう。
+function clearVideoWatch(){
+  if (!directWatch) return;
+  clearInterval(directWatch.iv); clearTimeout(directWatch.timer);
+  directWatch = null;
+}
+
+// 映像が本当に出たかを見張る。
+// 【connectionState を見ない理由】背面復帰と同じで、"connected" のまま
+// 実際には流れていないことがある。video.currentTime が進むかで測る。
+function watchFirstVideo(canFallback){
+  clearVideoWatch();
+  const base = video.currentTime;
+  const st = {};
+  st.iv = setInterval(() => {
+    if (video.currentTime > base + 0.05) {
+      clearInterval(st.iv); clearTimeout(st.timer);
+      if (directWatch === st) directWatch = null;
+      phase("映像の1フレーム目");
+    }
+  }, 100);
+  st.timer = setTimeout(() => {
+    clearInterval(st.iv);
+    if (directWatch === st) directWatch = null;
+    if (!canFallback) { log("[計測] " + (DIRECT_START_WAIT / 1000) + "秒たっても映像が出ていません"); return; }
+    // 【フォールバック】直送では駄目な条件が過去にあった(詳細が残っていない)。
+    // ここで従来の経路に落ちるので、条件が何であっても最終的には配信が始まる。
+    log("直送では映像が出ませんでした → 接続を張り直します");
+    pendingStart = true;
+    reconnect();
+  }, DIRECT_START_WAIT);
+  directWatch = st;
+}
 function setState(s, cls){
   $("state").textContent = s; $("dot").className = "dot" + (cls? " "+cls : "");
   updateGuide(s, cls);
@@ -1075,7 +1164,7 @@ function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const excl = $("p2p").checked ? "&excl=1" : "";
   ws = new WebSocket(`${proto}://${location.host}/ws?codec=${currentCodec}${excl}`);
-  ws.onopen  = () => { setState("signaling", "warn"); log("ws open ("+currentCodec+(excl?" P2P":"")+")"); };
+  ws.onopen  = () => { setState("signaling", "warn"); log("ws open ("+currentCodec+(excl?" P2P":"")+")"); phase("サーバーに接続"); };
   ws.onclose = () => { setState("disconnected"); log("ws close"); };
   ws.onerror = (e) => log("ws error");
   ws.onmessage = async (ev) => {
@@ -1112,7 +1201,7 @@ async function setupPeer() {
   pc.oniceconnectionstatechange = () => { log("ICE:", pc.iceConnectionState); };
   pc.onconnectionstatechange = () => {
     log("pc", pc.connectionState);
-    if (pc.connectionState === "connected") { setState("connected", "on"); logSelectedRoute(); }
+    if (pc.connectionState === "connected") { setState("connected", "on"); logSelectedRoute(); phase("P2P確立"); }
     if (pc.connectionState === "failed") setState("failed", "err");
   };
   pc.ontrack = (e) => {
@@ -1146,7 +1235,7 @@ async function setupPeer() {
       // 認証を要求するサーバーは authRequired を、しないサーバーは encoders 等の
       // 初期情報を送ってくる。どちらか届くまでは操作を有効にしない(誤ってStartを
       // 送って弾かれるのを防ぐ)。ここでは待機状態にするだけ。
-      log("control open (サーバー応答待ち)");
+      log("control open (サーバー応答待ち)"); phase("controlチャネル開通");
       setState("接続中","");
       $("start").disabled = true;
       authReady = false;
@@ -1552,11 +1641,12 @@ function markReady(){
   authReady = true;
   setState("connected","on");
   $("start").disabled = false;
+  phase("操作解禁(Startが押せる)");
   if (pendingStart) {
     pendingStart = false;
-    sendControl({ type: "start", bitrate: +$("bitrate").value, codec: currentCodec, mtu: +$("mtu").value, monitor: parseInt($("monSel").value, 10) });
-    $("hint").style.display = "none";
-    $("start").disabled = true; $("stop").disabled = false;
+    // 張り直し経由なので、ここでは映像が出なくても再度張り直さない
+    // (張り直しを繰り返す経路を作らない)。
+    sendStartNow(false);
   }
   updateGuide("connected","on");
 }
@@ -1640,8 +1730,18 @@ $("reconnBtn").onclick = () => {
 // Start は接続を張り直してから配信開始する（Stop/Start繰り返しで音声が止まる問題の回避）。
 // コーデック切り替えと同じく、毎回新しいトラックで始めるためトラックの不連続が起きない。
 $("start").onclick = () => {
-  pendingStart = true;
   autoArm();          // ここから自動再接続の監視を始める
+  // 【二段構え】接続が健全なら start を送るだけにする。
+  // 張り直しの固定待ちと、ICE/DTLS/認証のやり直しを丸ごと省ける。
+  // 判定は autoHealthy() を使い回す(経路が張れていて制御チャネルが開いている)。
+  // ボタンが押せている時点で認証は通っているので、これで足りる。
+  if (autoHealthy()) {
+    phaseStart("Start(直送)");
+    log("start -> 直送(接続を維持したまま)");
+    sendStartNow(true);   // 映像が出なければ、この中から張り直しへ落ちる
+    return;
+  }
+  pendingStart = true;
   log("start -> reconnect");
   reconnect(); // 再接続後、control open で自動的に start を送る
 };
@@ -1657,13 +1757,23 @@ function toggleMute(){
 }
 // 操作タブ内と映像オーバーレイの音声ボタン表示を常に同期する
 function setMuteLabel(){
-  const icon = video.muted ? "🔇" : "🔊";
-  const label = video.muted ? "音声ON" : "音声OFF";
+  // 表示は「押すとどうなるか」ではなく**いまどうなっているか**で統一する。
+  // 【以前の不具合】絵柄は状態(🔇 = いま消音)、文言は動作(「音声ON」= 押すとONになる)を
+  // 指していて、同じボタンの中で意味が逆を向いていた。絵柄の側が正しいので文言を合わせた。
+  const on = !video.muted;
+  const icon = on ? "🔊" : "🔇";
+  const st = on ? "ON" : "OFF";
+  const pill = '<span class="sw' + (on ? " on" : "") + '">' + st + '</span>';
   // 操作タブのボタンは狭い画面で短い文言に切り替わるため、2種類の文言を別の要素で持つ。
   // textContent で丸ごと書き換えると span 構造が壊れ、切り替えが効かなくなる。
-  $("unmute").innerHTML = '<span class="bs">音声</span><span class="bl">' + icon + " " + label + '</span>';
-  $("unmute").title = label;
-  $("ovMute").textContent = icon + " " + label; // 映像上のボタンは幅があるので常に完全な文言
+  const b = $("unmute");
+  b.innerHTML = '<span class="bs">音' + st + '</span><span class="bl">' + icon + ' 音声</span>' + pill;
+  b.title = "音声" + st;
+  b.setAttribute("aria-pressed", on ? "true" : "false");
+  // 映像上のボタンは幅があるので常に完全な文言 + 札。
+  const ov = $("ovMute");
+  ov.innerHTML = icon + " 音声" + pill;
+  ov.setAttribute("aria-pressed", on ? "true" : "false");
 }
 
 // コーデック切り替え: 設定を変えるだけ。次回 Start 時に反映される。
@@ -1679,6 +1789,8 @@ function reconnect() {
   // 「意図的な再接続を切断と誤認する」経路がこの1行で全部塞がる。
   autoTryingUntil = Date.now() + AUTO_SETTLE;
   autoBadSince = 0;
+  clearVideoWatch();   // 張り直すので、直前の見張りは用済み(二重に張り直さない)
+  phaseStart("接続を開始(張り直し)");
   // 既存の接続を破棄して作り直す。
   try { if (control) control.close(); } catch(e){}
   try { if (pc) pc.close(); } catch(e){}
@@ -1693,6 +1805,7 @@ function reconnect() {
 }
 $("stop").onclick = () => {
   autoDisarm();       // 自動再接続を止める(利用者が明確に「終わり」と言った操作)
+  clearVideoWatch();  // 映像の見張りも解除(止めた直後を「出なかった」と誤認しない)
   sendControl({ type: "stop" });
   $("start").disabled = false; $("stop").disabled = true;
   updateGuide("connected","on");
@@ -4112,7 +4225,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.0";
+const CLIENT_VERSION = "v0.7.2";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
