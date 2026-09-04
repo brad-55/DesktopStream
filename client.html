@@ -1893,6 +1893,15 @@ function roomHistRender(){
     del.textContent = "×";
     del.setAttribute("aria-label", "この部屋を履歴から消す");
     del.onclick = () => {
+      // 【確認を挟む理由】ルームIDはランダムな32文字で手では打ち直せず、
+      // 一覧では途中を省いて表示しているので、消えたあとの手がかりも残らない。
+      // 取り消しも無いため、1タップで失うのは重すぎる。
+      // 【何が消えるのかを書く理由】「部屋そのものが消える」と読まれないように。
+      // 消えるのはこの端末の一覧だけで、パソコン側の部屋はそのまま使える。
+      const what = (e.name ? "「" + e.name + "」\n" : "") + roomHistShortId(e.id);
+      if (!confirm("この部屋を履歴から消しますか?\n" + what +
+                   "\n\nパソコン側の部屋は消えません。この端末の一覧から消えるだけです。\n" +
+                   "ルームIDは長いので、控えが無いと入れ直せません。")) return;
       roomHistSave(roomHistLoad().filter(x => x.id !== e.id));
       roomHistRender();
     };
@@ -4481,7 +4490,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.2";
+const CLIENT_VERSION = "v0.7.3";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
