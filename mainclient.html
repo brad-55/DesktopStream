@@ -4225,7 +4225,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.2";
+const CLIENT_VERSION = "v0.7.3";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
