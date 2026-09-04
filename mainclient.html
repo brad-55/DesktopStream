@@ -1139,10 +1139,17 @@ function watchFirstVideo(canFallback){
     let d = "";
     try {
       const t = (video.srcObject ? video.srcObject.getVideoTracks() : []) || [];
+      // 交渉の結果も出す。m-line が落ちていると「制御は動くのに映像だけ来ない」
+      // という形になり、接続が壊れているようには見えない(実際に踏んだ)。
+      const tx = pc ? pc.getTransceivers().map(x =>
+        ((x.receiver && x.receiver.track ? x.receiver.track.kind : "?") +
+         ":" + (x.currentDirection || x.direction))).join(" ") : "pcなし";
       d = " (映像トラック=" + t.length +
           (t[0] ? " muted=" + t[0].muted + " state=" + t[0].readyState : "") +
+          " srcObject=" + (video.srcObject ? "あり" : "なし") +
           " 解像度=" + video.videoWidth + "x" + video.videoHeight +
-          " readyState=" + video.readyState + " paused=" + video.paused + ")";
+          " readyState=" + video.readyState + " paused=" + video.paused +
+          " 交渉=[" + tx + "])";
     } catch(e){}
     log("[計測] " + (DIRECT_START_WAIT / 1000) + "秒たっても映像が出ていません" + d);
     if (!canFallback) return;
@@ -4247,7 +4254,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.4";
+const CLIENT_VERSION = "v0.7.5";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
