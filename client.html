@@ -2326,6 +2326,8 @@ const pad = $("pad");
 let vpx = 0, vpy = 0;       // 仮想ポインタ座標(映像コンテンツ基準px)
 let tpActive = false, tpLast = null, tpMoved = 0, tpStartTime = 0;
 let lpTimer = null, lpFired = false; // 長押し(右クリック)用
+let tpMoveT = 0;            // 直前の移動イベントの時刻(速さの算出用)
+let tpSlop = 0;             // 押し始めの遊びの消化量(PAD_SLOP まで動かさない)
 let dragging = false;       // ドラッグ状態(左ボタン押しっぱなし)
 let lastTapUp = 0;          // 直前タップの離した時刻(ドラッグ入り判定用)
 let moveThrottle = 0;       // ドラッグ中の移動送信の間引き
@@ -2334,10 +2336,33 @@ let dragArmTimer = null;    // 2度目押下を保持したらドラッグ開始
 let pendClickTimer = null;  // 1タップ目のクリック保留タイマー
 let pendingClick = false;   // 保留中クリックが有効か(タイマーと分離して2度目押下で確実に止める)
 let firstTapPos = null;     // 1タップ目の座標(コンテンツ基準)。ドラッグはここから開始
-const SENS = 0.75;          // 感度(移動速度)
-const TAP_MOVE = 12;        // タップ判定の移動上限(px)
+const SENS = 0.75;          // 感度の基準。全体を速く/遅くしたいときはここだけ触る
+// --- ポインタの安定化(速さで利きを変える) ---
+// 【なぜ一定倍率をやめたか】狙った場所へ細かく寄せられず、クリック位置をよく外していた。
+// 指の震えやタップ時の滑りがそのままポインタに乗るのが原因。
+// 【平滑化にしなかった理由】移動平均は必ず遅れを生み、指を止めてもポインタが進む。
+// それは「当てにくさ」を別の形にしただけになる。速さで利きを変える方式なら遅れは出ない。
+// 下限を SENS より小さく、上限を大きくしてあるので、
+// ゆっくり動かすと精密になり、速く動かすと従来より少し速く届く。
+const SENS_SLOW = 0.35;     // ゆっくり動かすときの倍率(SENSに掛ける)
+const SENS_FAST = 1.10;     // 速く動かすときの倍率(SENSに掛ける)
+const SPD_LO = 0.20;        // px/ms これ以下は SENS_SLOW
+const SPD_HI = 1.40;        // px/ms これ以上は SENS_FAST
+// 押し始めの遊び(px)。触れた直後のこの距離までポインタを動かさない。
+// タップは置いて離すだけでも滑るため、それが乗ると押す瞬間にずれる。
+// TAP_MOVE より小さくして、タップ/長押しの判定は今までどおりにする。
+const PAD_SLOP = 6;
+// タップ判定の移動上限(px)。**指の実移動**で見る。
+// 【16にした理由】以前は倍率0.75を掛けた後の値を12と比べていた。
+// 利きが速さで変わるようになったため、判定まで一緒に動いてしまう。
+// 指の実移動で見るように改め、しきい値は従来と同じ挙動になる値(12÷0.75=16)に置いた。
+const TAP_MOVE = 16;
 const TAP_TIME = 300;       // タップ判定の時間上限(ms)
-const LONGPRESS = 1000;     // 長押し=右クリック判定(ms)
+// 長押し=右クリック判定(ms)。
+// 【1000から短縮】長すぎて右クリックが億劫だった。
+// TAP_TIME(300)との間隔は残してある。ここを300に近づけると、
+// ゆっくりしたタップが右クリックに化ける。
+const LONGPRESS = 650;
 const DRAG_HOLD = 180;      // 2度目の押下をこの時間以上保持で「ドラッグ入り」
 const DBL_WINDOW = 350;     // 直前タップからこの時間内の2度目押下を連続とみなす
 
@@ -2787,6 +2812,7 @@ function attachPointer(el, activeFn){
     tpActive = true; lpFired = false;
     tpLast = { x: ev.clientX, y: ev.clientY };
     tpMoved = 0; tpStartTime = Date.now();
+    tpSlop = 0; tpMoveT = performance.now(); // 遊びと速さの計測を押下ごとに初期化
     try { el.setPointerCapture(ev.pointerId); } catch(e){}
     // この押下が「直前タップ直後の2度目押下」か。
     secondPress = (Date.now() - lastTapUp) < DBL_WINDOW;
@@ -2822,14 +2848,34 @@ function attachPointer(el, activeFn){
     if (dirOwnsPointer(el, ev)) return; // 直接操作が担当
     if (padTwoFinger) return;
     if (!mouseEnabled() || !tpActive || !activeFn()) return;
-    const dx = (ev.clientX - tpLast.x) * SENS;
-    const dy = (ev.clientY - tpLast.y) * SENS;
+    const rx = ev.clientX - tpLast.x;
+    const ry = ev.clientY - tpLast.y;
     tpLast = { x: ev.clientX, y: ev.clientY };
-    tpMoved += Math.abs(dx) + Math.abs(dy);
+    const nowMs = performance.now();
+    const dtms = Math.max(1, nowMs - tpMoveT);
+    tpMoveT = nowMs;
+
+    // タップ・長押しの判定は**指の実移動**で見る。
+    // ポインタ側の移動量で見ると、利きが速さで変わるぶん判定まで一緒に動いてしまう。
+    tpMoved += Math.abs(rx) + Math.abs(ry);
     if (tpMoved >= TAP_MOVE) {
       clearTimeout(lpTimer);                       // 1度目押下の長押し(右クリック)は動いたら取消
       if (!secondPress) clearTimeout(dragArmTimer); // ただし2度目押下は動いてもドラッグ発火を維持(すぐ動かしてもドラッグ可)
     }
+
+    // 押し始めの遊び。ここを抜けるまでポインタは動かさない。
+    // 「置いて離すだけ」のタップでポインタがずれるのを防ぐ。
+    if (tpSlop < PAD_SLOP) {
+      tpSlop += Math.hypot(rx, ry);
+      if (tpSlop < PAD_SLOP) return;
+    }
+
+    // 指の速さで利きを決める(遅い=精密 / 速い=速く届く)。
+    const spd = Math.hypot(rx, ry) / dtms;             // px/ms
+    const t = Math.min(1, Math.max(0, (spd - SPD_LO) / (SPD_HI - SPD_LO)));
+    const gain = SENS * (SENS_SLOW + (SENS_FAST - SENS_SLOW) * t);
+    const dx = rx * gain;
+    const dy = ry * gain;
     vpx += dx; vpy += dy;
     clampPtr(); drawPtr();
     // 実カーソルを常に追従させる。
@@ -4562,7 +4608,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.6";
+const CLIENT_VERSION = "v0.7.7";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
