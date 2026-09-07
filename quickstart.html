@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='%232ecf8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E %3Crect x='2' y='3' width='20' height='14' rx='2'/%3E %3Cpath d='M12 17v3M8 20h8'/%3E %3Cpath d='M4 4l7.07 17 2.51-7.39L21 11.06z' fill='%232ecf8e' stroke='none' transform='translate(6.8 3.8) scale(0.5)'/%3E %3C/svg%3E" />
+<title>クイックスタート | Desktop Stream</title>
+<style>
+  :root { --accent:#2f6b4f; --accent2:#4a9e77; --bg:#f7f9f8; --card:#ffffff; --text:#233; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.9; }
+  header { background:linear-gradient(135deg,#1c3a2e,#2f6b4f); color:#fff; padding:36px 20px; text-align:center; }
+  header h1 { margin:0 0 6px; font-size:26px; }
+  header p { margin:0; opacity:.9; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 60px; }
+  .step { background:var(--card); border-radius:14px; padding:20px 22px; margin:18px 0;
+          box-shadow:0 2px 10px rgba(0,0,0,.06); border-left:6px solid var(--accent2); }
+  .step h2 { margin:0 0 10px; font-size:18px; display:flex; align-items:center; gap:10px; }
+  .num { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px;
+         border-radius:50%; background:var(--accent); color:#fff; font-size:16px; flex:none; }
+  .tip { background:#eef7f2; border-radius:10px; padding:10px 14px; font-size:14px; margin-top:10px; }
+  .tip::before { content:"💡 "; }
+  .warn { background:#fdf3e7; border-radius:10px; padding:10px 14px; font-size:14px; margin-top:10px; }
+  .warn::before { content:"⚠️ "; }
+  code { background:#eef1f0; padding:2px 8px; border-radius:6px; font-size:14px; }
+  kbd { background:#233; color:#fff; padding:2px 8px; border-radius:6px; font-size:13px; }
+  a { color:var(--accent); }
+  footer { text-align:center; font-size:13px; color:#889; padding:20px; }
+  .goal { background:#fff; border:2px dashed var(--accent2); border-radius:14px; padding:16px 20px; margin:18px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🖥️ Desktop Stream クイックスタート</h1>
+  <p>5分でパソコンの画面をスマホに映す</p>
+</header>
+<main>
+
+  <div class="goal">
+    <b>このガイドのゴール:</b> パソコン(Windows)のデスクトップ画面と音を、スマホのブラウザで見られるようにします。
+    むずかしい設定は不要です。上から順にやるだけでOK。
+  </div>
+
+  <div class="step">
+    <h2><span class="num">1</span>サーバーを起動する</h2>
+    <p><code>DesktopStream.exe</code> をダブルクリックします。</p>
+    <p>「このアプリがデバイスに変更を加えることを許可しますか?」と出たら <b>「はい」</b> を押してください。
+    小さなウィンドウが開けば起動完了です。</p>
+    <div class="tip">この確認画面(UAC)は、スマホからタスクマネージャーなども操作できるようにするために必要です。</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">2</span>ルームIDを表示する</h2>
+    <p>タスクトレイのアイコンを右クリックして <b>「コンソールを開く」</b> を選ぶと、英数字のID と QRコード が表示されます。</p>
+    <div class="warn">ルームIDは「合言葉」です。知っている人はあなたの画面に接続できます。他人に見せないでください。</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">3</span>スマホでクライアントを開く</h2>
+    <p>スマホのブラウザで、配布されたクライアントページ(GitHub PagesのURL)を開きます。</p>
+    <div class="tip">同じWi-Fi内なら <code>https://パソコンのIPアドレス:8080</code> でも開けます(ルームIDは不要です)。<br><b>初回はパソコン側に「接続を許可しますか」のダイアログが出るので「はい」を押してください。</b>
+    自己署名証明書のため初回は警告が出ます。「詳細設定」→「アクセスする」で進んでください。</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">4</span>ルームIDを読み込む</h2>
+    <p>スマホの画面の <b>「ルームID入力」</b> ボタンを押し、<b>「📷 カメラ撮影(QR)」</b> を選んで、
+    手順2で表示したQRコードを写します。読み取れると自動で接続が始まります。</p>
+    <div class="tip">カメラが使えないときは「文字列入力」で、表示されたIDをそのまま打ち込んでもOKです。</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">5</span>配信スタート！</h2>
+    <p>接続できたら <b>Start</b> ボタンを押します。パソコンの画面がスマホに映れば成功です 🎉</p>
+    <p>音を出したいときは音声ボタンを押して <b>「🔊 音声 ON」</b> にしてください
+    (ボタンには<b>いまの状態</b>が出ます。最初は消音なので「🔇 音声 OFF」です)。</p>
+    <div class="tip">映像がカクつくときは bitrate(画質)の数字を小さくして、もう一度 Start してみてください。</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">＋</span>マウス操作もできます</h2>
+    <p>画面下のパッドは最初から使えます。
+    なぞってポインタを動かし、タップでクリック、長押しで右クリックです。
+    文字を打ちたいときは「入力」のプルダウンで文字入力に切り替えられます。<br>パソコンから操作する場合は切り替え不要で、映像の上でマウスを動かすだけでそのまま操作できます。</p>
+    <div class="tip">受信中の画面をほかの人にもコメント付きで見せたいときは「再配信」タブが使えます(詳しくは使い方ガイド)。</div>
+  </div>
+
+  <p style="text-align:center; margin-top:28px;">
+    もっと詳しく知りたい方は <a href="guide.html"><b>詳細版 使い方ガイド</b></a> へ
+  </p>
+</main>
+<footer>Desktop Stream — Quick Start Guide</footer>
+</body>
+</html>
