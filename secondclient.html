@@ -284,7 +284,7 @@ const $ = (id) => document.getElementById(id);
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.1";
+const CLIENT_VERSION = "v0.7.2";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -688,9 +688,18 @@ const CM_PALETTE = ["#7fd1ff", "#ffd479", "#a5f3b4", "#ff9db0", "#d3b4ff", "#ffb
   $("cmColor").value = c;
 })();
 $("cmColor").addEventListener("change", () => localStorage.setItem("dss_view_color", $("cmColor").value));
+// アイコンは**他人が送ってくるデータ**。<img> の src にそのまま入るため、
+// 受け取る種類を絞る。
+//
+// 【SVGを外す理由】<img> で読み込んだSVGはスクリプトが動かない仕様なので、
+// これ自体は今すぐの穴ではない。ただし「動かないはず」を前提に置き続けるより、
+// ラスタ画像に限って**疑う余地そのものを消す**方が安い。
+// 【data: に限る理由】http(s) を許すと、アイコンを置いた相手に
+// 視聴者のIPアドレスが渡る(表示しただけで取得が走るため)。
 function validIcon(v){
   v = String(v || "");
-  return (v.startsWith("data:image/") && v.length < 20000) ? v : "";
+  if (v.length >= 20000) return "";
+  return /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(v) ? v : "";
 }
 function avatarEl(name, color, icon, host){
   const av = document.createElement("span");
