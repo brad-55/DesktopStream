@@ -1314,7 +1314,9 @@ function connect() {
   ws.onclose = () => { setState("disconnected"); log("ayame close"); };
   ws.onerror = (e) => log("ayame error");
   ws.onmessage = async (ev) => {
-    const m = JSON.parse(ev.data);
+    // 壊れたメッセージ1つでハンドラを落とさない(制御チャネル側は既にこうしてある)。
+    let m;
+    try { m = JSON.parse(ev.data); } catch(e){ log("ayame: 解釈できないメッセージを無視"); return; }
     if (m.type === "ping") { ws.send(JSON.stringify({ type: "pong" })); return; }
     if (m.type === "accept") {
       log("ayame accepted (isExistClient=" + m.isExistClient + ")"); phase("入室(accept)");
@@ -1565,7 +1567,14 @@ $("kbdText").addEventListener("keydown", (e) => {
 // ショートカットのプルダウン送信。カスタム組み合わせはlocalStorageに保存して追加できる。
 (function(){
   const sel = $("scSel");
-  const saved = JSON.parse(localStorage.getItem("dss_custom_keys") || "[]");
+  // 【素で JSON.parse しない】ここは**読み込み時に走る**。壊れた値が残っていると
+  // SyntaxError でスクリプト全体が止まり、「ページは開けるが何も動かない」になる。
+  // 配列でない値(例: "5")でも、下の forEach で同じ結末になるため型まで確かめる。
+  let saved = [];
+  try {
+    const v = JSON.parse(localStorage.getItem("dss_custom_keys") || "[]");
+    if (Array.isArray(v)) saved = v.filter(x => typeof x === "string");
+  } catch(e){ /* 壊れていたら空から始める */ }
   const addOpt = (k) => {
     const o = document.createElement("option");
     o.value = k; o.textContent = k;
@@ -4608,7 +4617,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.7";
+const CLIENT_VERSION = "v0.7.8";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
