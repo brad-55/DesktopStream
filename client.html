@@ -997,6 +997,17 @@
 
     <div class="tabpage" id="tab-settings">
       <div class="setting-card">
+        <!-- 両方の言語で読めるよう併記する(訳さない) -->
+        <span class="sc-label" data-noi18n>言語 / Language</span>
+        <div class="sc-row">
+          <select id="langSel" data-noi18n>
+            <option value="auto">自動 / Auto</option>
+            <option value="ja">日本語</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-card">
         <span class="sc-label">マウスポインタの形</span>
         <span class="sc-desc">操作中に表示される仮想ポインタのデザイン</span>
         <div class="sc-row">
@@ -1126,9 +1137,309 @@
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
+// ================= 表示言語(英語対応) =================
+// 【ここに置く理由】読み込み時に通る処理が T() を呼ぶ。宣言より前に参照すると
+// TDZ違反でスクリプト全体が止まる(過去に踏んだ地雷)。
+// 【仕組み】辞書のキーは日本語の原文そのもの。日本語のときは何もしない。
+// 辞書に無い文言は日本語のまま出るだけで、壊れはしない。
+// 固定のマークアップは読み込み時に1回だけ完全一致で置き換え、JS で書く文言は T() を通す。
+// 【ログは訳さない】log() は利用者から開発者へ送られる診断情報のため日本語のまま。
+// 設計と、採らなかった案(書き込みの監視・data-i18n 属性)は docs/project/i18n-design.md。
+// 【この辞書は LAN版と完全に同一】片方だけ直すと食い違う。AC34 が一致を検査している。
+const LANG = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get("lang");
+    if (q === "ja" || q === "en") return q;
+    const s = localStorage.getItem("dss_lang");
+    if (s === "ja" || s === "en") return s;
+  } catch(e){}
+  const n = (navigator.languages && navigator.languages[0]) || navigator.language || "";
+  if (!n) return "ja"; // 判定できなければ日本語
+  return /^ja/i.test(n) ? "ja" : "en";
+})();
+// "@" で始まるキーは属性(title / placeholder / aria-label / alt)専用の訳。
+// 同じ原文でも、狭いボタンの短い文言とツールチップでは別の訳が要るため。
+const I18N_EN = {
+  // ---- 上部・タブ ----
+  "再接続": "Reconnect",
+  "映像を再取得中…": "Reacquiring video…",
+  "Start で配信開始": "Press Start to begin streaming",
+  "1×に戻す": "Reset to 1×",
+  "接続していません": "Not connected",
+  "操作": "Control",
+  "接続": "Connect",
+  "再配信": "Restream",
+  "コメント": "Comments",
+  "設定": "Settings",
+  "読込中…": "Loading…",
+  // ---- 操作タブのボタン(短い文言 .bs は狭い画面用。長いと切れる) ----
+  // 英語では絵文字を外す。"Audio" + 札で幅いっぱいになり、絵文字を足すと360px幅の画面で切れる(実測)。
+  // 状態は札の ON / OFF で読める。
+  "🔇 音声": "Audio",
+  "🔊 音声": "Audio",
+  "音OFF": "Snd OFF",
+  "音ON": "Snd ON",
+  "全画面": "Full",
+  "⛶ 全画面": "⛶ Fullscreen",
+  "ラグ": "Lag",
+  "⚡ ラグ解消": "⚡ Cut lag",
+  "音ズレ": "Sync",
+  "🔊 音ズレ解消": "🔊 A/V sync",
+  "撮影": "Shot",
+  "📷 スクショ": "📷 Snapshot",
+  "録画": "Rec",
+  "⏺ 録画": "⏺ Record",
+  "録画中": "REC",
+  "⏹ 録画中": "⏹ Recording",
+  "音−": "Vol−",
+  "音量−": "Volume −",
+  "音＋": "Vol+",
+  "音量＋": "Volume +",
+  "消音": "Mute",
+  "消灯": "Blank",
+  "画面OFF": "Screen OFF",
+  "送信": "Send",
+  "キー送信": "Send keys",
+  "画面ロック": "Lock",
+  "半角/全角(IME切替)": "Hankaku/Zenkaku (IME)",
+  "Shift+右クリック": "Shift+Right-click",
+  "＋カスタム追加…": "+ Add custom…",
+  "対象と入力方式": "Target & input",
+  "画面": "Screen",
+  "メイン": "Main",
+  "入力": "Input",
+  "🖱 トラックパッド": "🖱 Trackpad",
+  "⌨ 文字入力": "⌨ Text input",
+  "PCを操作する": "Control the PC",
+  "ここをなぞってポインタ移動 / タップで左クリック / 長押しで右クリック": "Slide to move the pointer / Tap to left-click / Long-press to right-click",
+  "@文字入力の表示切り替え": "Show or hide text input",
+  "@全画面切り替え": "Toggle fullscreen",
+  "@全画面": "Fullscreen",
+  "@ドラッグでスクロール": "Drag to scroll",
+  "@音声OFF": "Audio OFF",
+  "@音声ON": "Audio ON",
+  "@接続を保ったまま映像の遅延をリセットします": "Clears video lag without disconnecting",
+  "@映像と音声のズレを合わせ直します": "Re-aligns audio and video",
+  "@画面を画像で保存します": "Saves the screen as an image",
+  "@画面を動画で保存します": "Records the screen as a video",
+  "@この端末のコピー内容をPCへ送ります": "Sends this device's clipboard to the PC",
+  "@PCのコピー内容をこの端末へ取り込みます": "Copies the PC's clipboard to this device",
+  "@PCの音量を下げます": "Turns the PC volume down",
+  "@PCの音量を上げます": "Turns the PC volume up",
+  "@PCを消音します": "Mutes the PC",
+  "@PCの画面を消します": "Turns off the PC display",
+  "@ここに入力して送信(日本語OK)": "Type here and send",
+  "@ショートカット選択": "Choose a shortcut",
+  "@ロック画面/ログイン画面で使います": "Use on the lock or sign-in screen",
+  "@PCの画面をロックします(Win+L相当)": "Locks the PC (same as Win+L)",
+  // ---- 再配信タブ ----
+  "📡 再配信を開始": "📡 Start restream",
+  "⏹ 再配信を停止": "⏹ Stop restream",
+  "🎙 マイクON": "🎙 Mic ON",
+  "🔇 ミュート中": "🔇 Mic muted",
+  "🔊 PC音声OFF": "🔊 PC audio OFF",
+  "🔊 PC音声ON": "🔊 PC audio ON",
+  "↑配信中の映像": "↑ Video being restreamed",
+  "部屋数": "Rooms",
+  "映像": "Video",
+  "🖥 リモートデスクトップ": "🖥 Remote desktop",
+  "📷 カメラ": "📷 Camera",
+  "🖼 静止画": "🖼 Still image",
+  "枠をドラッグ/リサイズして切り取り範囲を調整(配信中は即時反映)": "Drag or resize the frame to set the crop area (applied immediately while streaming)",
+  "全体に戻す": "Reset to full",
+  "タイトル": "Title",
+  "合言葉": "Passphrase",
+  "視聴URLを再生成": "Regenerate viewer URL",
+  "視聴者:": "Viewers:",
+  "人": "",
+  "視聴用URL(再配信中に有効)": "Viewer URL (valid while restreaming)",
+  "コピー": "Copy",
+  "視聴者履歴": "Viewer history",
+  "まだ視聴者はいません": "No viewers yet",
+  "※マイクとカメラはHTTPSまたはlocalhostでのみ利用できます。「リモートデスクトップ」はプレーヤーで受信中の映像を再配信します。": "* The mic and camera work only over HTTPS or on localhost. \"Remote desktop\" restreams the video this player is receiving.",
+  "視聴者コメント(再配信)": "Viewer comments (restream)",
+  "@配信タイトル(任意)": "Stream title (optional)",
+  "@未設定なら誰でも視聴可": "If empty, anyone can watch",
+  "@再配信を開始すると表示されます": "Shown after you start restreaming",
+  "@配信者としてコメント": "Comment as the streamer",
+  "切断": "Disconnect",
+  "さんが入室しました": "joined",
+  "さんが退室しました": "left",
+  "さんが退室しました(配信停止)": "left (restream stopped)",
+  "名無し": "Anonymous",
+  "ユーザー名未入力": "(no name yet)",
+  "配信者": "Streamer",
+  "TURN経由": "via TURN",
+  "入室": "joined",
+  "退室": "left",
+  "視聴中": "watching",
+  "QR生成ライブラリを読み込めませんでした。URLをコピーして共有してください。": "Could not load the QR library. Copy the URL and share it instead.",
+  "画面は一時的に非表示です": "The screen is temporarily hidden",
+  // ---- 設定タブ ----
+  "マウスポインタの形": "Pointer style",
+  "操作中に表示される仮想ポインタのデザイン": "Look of the on-screen pointer shown while you control the PC",
+  "矢印(既定)": "Arrow (default)",
+  "リングドット": "Ring dot",
+  "ファイルをPCへ送る": "Send a file to the PC",
+  "選んだファイルをPC側の received フォルダに保存します": "Saves the selected file to the received folder on the PC",
+  "他の端末を起こす (Wake on LAN)": "Wake another device (Wake on LAN)",
+  "PCと同じネットワークにある端末へ起動パケットを送ります": "Sends a wake-up packet to a device on the PC's network",
+  "@MACアドレス (例 00:11:22:33:44:55)": "MAC address (e.g. 00:11:22:33:44:55)",
+  "画質・コーデック": "Quality & codec",
+  "接続待ち…": "Waiting for connection…",
+  "ネットワーク詳細": "Network details",
+  "通常は変更不要です": "Usually no need to change",
+  "P2P直結(B)": "Direct P2P (B)",
+  "直接操作": "Direct control",
+  "物理マウス・キーボードは映像上で直接操作する": "Use a physical mouse and keyboard directly on the video",
+  "画面点灯": "Keep screen on",
+  "操作中は画面を消さない(電池を使います。前面にいる間だけ有効)": "Keep this device's screen on while controlling (uses battery; only while in the foreground)",
+  "バックグラウンド動作:": "Background:",
+  "※バックグラウンド動作(他のアプリに移っても接続を保つこと)はOSへの申告で行います。": "* Staying connected in the background (while you use other apps) works by telling the OS that audio is playing.",
+  "音声をONにしていないと効きません": "It works only while audio is ON",
+  "(鳴っている音が無いと、OSが維持すべきものが無いため)。 経過は接続タブのログに時刻付きで残ります。": "(with no audio playing, the OS has nothing to keep alive). Events are logged with timestamps in the Connect tab.",
+  "モード": "Mode",
+  "動画視聴重視(なめらか)": "Smooth playback",
+  "リアルタイム重視(低遅延)": "Real-time (low latency)",
+  "動作中 / 接続={0}": "Running / connection={0}",
+  "割り込み中(通話・Siriなど)": "Interrupted (call, Siri, etc.)",
+  "宣言済み({0})": "Declared ({0})",
+  "この端末はAudio Session非対応(iOS以外)": "Audio Session not supported on this device (non-iOS)",
+  "リモート操作中": "Remote control in progress",
+  "未接続": "not connected",
+  "不明": "unknown",
+  // ---- 接続タブ ----
+  "接続設定": "Connection",
+  "ルームID入力": "Enter room ID",
+  "room: 未設定": "room: not set",
+  "通信状態": "Connection status",
+  "バージョン": "Version",
+  "クライアント:": "Client:",
+  "サーバー:": "Server:",
+  "ログ": "Log",
+  "ルームIDを設定": "Set room ID",
+  "📷 カメラ撮影(QR)": "📷 Scan QR with camera",
+  "🖼 写真から(QR)": "🖼 QR from a photo",
+  "カメラ停止": "Stop camera",
+  "決定": "OK",
+  "最近つないだ部屋": "Recent rooms",
+  "閉じる": "Close",
+  "@ルームIDを入力": "Enter room ID",
+  "名前(任意)": "Name (optional)",
+  "選ぶ": "Use",
+  "使用中": "in use",
+  "「{0}」": "\"{0}\"",
+  "この部屋を履歴から消す": "Remove this room from history",
+  "この部屋を履歴から消しますか?\n{0}\n\nパソコン側の部屋は消えません。この端末の一覧から消えるだけです。\nルームIDは長いので、控えが無いと入れ直せません。":
+    "Remove this room from history?\n{0}\n\nThe room on the PC is not deleted. It is only removed from this device's list.\nRoom IDs are long, so you cannot re-enter it without a copy.",
+  // ---- 状態と案内 ----
+  "認証拒否": "auth denied",
+  "接続中": "connecting",
+  "ルームIDを設定してください（「接続」タブ → ルームID入力）": "Set a room ID (Connect tab → Enter room ID)",
+  "「再接続」で接続できます": "Press \"Reconnect\" to connect",
+  "サーバーに接続していません": "Not connected to the server",
+  "接続中…": "Connecting…",
+  "再接続中…": "Reconnecting…",
+  "再接続中…（数秒お待ちください）": "Reconnecting… (please wait a few seconds)",
+  "サーバーの応答を待っています…": "Waiting for the server to respond…",
+  "サーバーが見つかりません。サーバーの起動状態と、ルームIDがサーバーと一致しているか確認してください（サーバー側で再生成・再配置した場合はIDが変わります）":
+    "Server not found. Check that the server is running and that the room ID matches the server's (the ID changes if it was regenerated on the server).",
+  "接続できませんでした": "Could not connect",
+  "接続できませんでした。サーバー側で承認が必要な場合があります": "Could not connect. The PC may need to approve this device.",
+  "認証中…（初回はサーバーPCで承認してください）": "Authenticating… (the first time, approve this device on the PC)",
+  "「Start」で配信を開始できます": "Press \"Start\" to begin streaming",
+  "配信中": "Streaming",
+  "自動再接続中… ({0}回目)": "Auto-reconnecting… (attempt {0})",
+  "AVズレ:映像+{0}ms": "A/V: video +{0}ms",
+  "AVズレ:音声+{0}ms": "A/V: audio +{0}ms",
+  "この回線は直接つながらない形式(対称型NAT)です": "This network cannot connect directly (symmetric NAT).",
+  "{0} の回線です。直接つながらないことがあります": "You are on {0}. Direct connections may fail.",
+  "楽天モバイル": "Rakuten Mobile",
+  "Wi-Fiに切り替えるか、別の回線をお試しください。": "Try switching to Wi-Fi or another network.",
+  "Tailscale経由(P2P直結をオフ)にするか、Wi-Fiに切り替えてください。": "Use Tailscale (turn off Direct P2P) or switch to Wi-Fi.",
+  // ---- 入力・ファイル ----
+  "送信するキーの組み合わせを入力 (例: ctrl+shift+n)": "Enter a key combination to send (e.g. ctrl+shift+n)",
+  "PCへ送るテキストを貼り付けてください": "Paste the text to send to the PC",
+  "自動コピーできない環境です。長押しでコピーしてください": "Automatic copy is not available here. Long-press to copy.",
+  "切断のため中断しました": "Stopped: disconnected",
+  "送信中… {0}%": "Sending… {0}%",
+  "送信完了(保存結果はログに表示されます)": "Sent (the save result appears in the log)",
+};
+const I18N_HAS = (k) => Object.prototype.hasOwnProperty.call(I18N_EN, k);
+// {0} を含むキーは、文字列を連結して作る文言と照合するための型。
+// 取り出した値も辞書で訳す(「動作中 / 接続=未接続」の「未接続」など)。
+const I18N_PAT = LANG !== "en" ? [] : Object.keys(I18N_EN).filter(k => /\{\d\}/.test(k)).map(k => {
+  const idx = [];
+  const src = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+               .replace(/\\\{(\d)\\\}/g, (_, d) => { idx.push(+d); return "(.+?)"; });
+  return [new RegExp("^" + src + "$"), k, idx];
+});
+// T("原文") / T("…{0}…", 値)。日本語では原文(と値の埋め込み)をそのまま返す。
+function T(s, ...a){
+  s = String(s);
+  if (LANG === "en"){
+    if (!a.length){
+      const k = s.trim().replace(/\s+/g, " ");
+      if (I18N_HAS(k)) return I18N_EN[k];
+      for (const [re, key, idx] of I18N_PAT){
+        const m = k.match(re);
+        if (m){ idx.forEach((d, i) => { a[d] = T(m[i + 1]); }); s = I18N_EN[key]; break; }
+      }
+      if (!a.length) return s;
+    } else if (I18N_HAS(s)) s = I18N_EN[s];
+  }
+  return a.length ? s.replace(/\{(\d)\}/g, (_, d) => (a[d] !== undefined ? a[d] : "")) : s;
+}
+// 要素の中の文字と属性を、辞書の完全一致で置き換える。
+// 読み込み時に body 全体へ1回。innerHTML で組み立て直した要素にも使う
+// (音声ボタンや録画ボタンは span 構造ごと書き直すため)。
+// 照合は前後の空白を除き、内部の連続空白を1つにまとめてから行う。前後の空白は残す。
+function i18nApply(root){
+  if (LANG !== "en" || !root) return;
+  const skip = (el) => el.closest("script,style,textarea,#log,[data-noi18n]");
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  for (let n = w.currentNode; n; n = w.nextNode()){
+    if (n.nodeType === 3){
+      const p = n.parentElement;
+      if (!p || skip(p)) continue;
+      const v = n.nodeValue, k = v.trim().replace(/\s+/g, " ");
+      if (!k || !I18N_HAS(k)) continue;
+      n.nodeValue = v.match(/^\s*/)[0] + I18N_EN[k] + v.match(/\s*$/)[0];
+    } else if (n.nodeType === 1 && !skip(n)){
+      for (const at of ["title", "placeholder", "aria-label", "alt"]){
+        const v = n.getAttribute(at);
+        if (!v) continue;
+        const k = v.trim().replace(/\s+/g, " ");
+        if (I18N_HAS("@" + k)) n.setAttribute(at, I18N_EN["@" + k]);
+        else if (I18N_HAS(k)) n.setAttribute(at, I18N_EN[k]);
+      }
+    }
+  }
+}
+if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(document.title); i18nApply(document.body); }
+// 言語の手動切り替え。保存して読み込み直す(表示中の文言を全部作り直すより確実)。
+// 【change を発火させない】値を戻すだけにする(読み込み時に勝手に再読み込みしないため)。
+(() => {
+  const sel = $("langSel");
+  if (!sel) return;
+  let v = "auto";
+  try { v = localStorage.getItem("dss_lang") || "auto"; } catch(e){}
+  sel.value = (v === "ja" || v === "en") ? v : "auto";
+  sel.addEventListener("change", () => {
+    try {
+      if (sel.value === "auto") localStorage.removeItem("dss_lang");
+      else localStorage.setItem("dss_lang", sel.value);
+    } catch(e){}
+    const u = new URL(location.href);
+    u.searchParams.delete("lang"); // URLの指定が残っていると、選んだ言語より優先されてしまう
+    location.replace(u.toString());
+  });
+})();
+
 const video = $("v");
 let pc, control, ws;
 let currentCodec = "qsv-h264"; // クライアントが選択中のコーデック
+let lastState = "";      // 状態の原文(表示は訳すことがあるため、判定はこちらで行う)
 let pendingStart = false;  // Startによる再接続中フラグ（control open時に自動start）
 let serverCPU = -1;        // サーバーCPU使用率(control経由で受信)
 
@@ -1268,7 +1579,9 @@ function watchFirstVideo(canFallback){
   directWatch = st;
 }
 function setState(s, cls){
-  $("state").textContent = s; $("dot").className = "dot" + (cls? " "+cls : "");
+  // 【表示を読み返さない】訳した表示と比べると判定が壊れるため、原文は lastState に持つ
+  lastState = s;
+  $("state").textContent = T(s); $("dot").className = "dot" + (cls? " "+cls : "");
   updateGuide(s, cls);
 }
 // 状態ガイド: 今なにをすべきかを平易に1行で示す。
@@ -1287,12 +1600,12 @@ function updateGuide(s, cls){
     else if ($("stop").disabled) { text = "「Start」で配信を開始できます"; tone = "ok"; }
     else { text = "配信中"; tone = "ok"; }
   } else { text = s; tone = cls === "on" ? "ok" : ""; }
-  g.textContent = text;
+  g.textContent = T(text);
   g.className = tone;
 }
 function updateRoomState(){
-  $("roomState").textContent = roomId ? ("room: " + roomId.slice(0,8) + "…") : "room: 未設定";
-  updateGuide($("state").textContent, $("dot").className.replace("dot","").trim());
+  $("roomState").textContent = roomId ? ("room: " + roomId.slice(0,8) + "…") : T("room: 未設定");
+  updateGuide(lastState, $("dot").className.replace("dot","").trim());
 }
 
 // --- Ayame Labo シグナリング ---
@@ -1353,7 +1666,7 @@ function connect() {
         setState("waiting server", "warn");
         clearTimeout(waitTimer);
         waitTimer = setTimeout(() => {
-          if ($("state").textContent === "waiting server") setState("no server", "err");
+          if (lastState === "waiting server") setState("no server", "err");
         }, 8000);
       }
       return;
@@ -1583,7 +1896,7 @@ $("kbdText").addEventListener("keydown", (e) => {
   saved.forEach(addOpt);
   sel.addEventListener("change", () => {
     if (sel.value !== "__custom") return;
-    const k = (prompt("送信するキーの組み合わせを入力 (例: ctrl+shift+n)") || "").trim().toLowerCase();
+    const k = (prompt(T("送信するキーの組み合わせを入力 (例: ctrl+shift+n)")) || "").trim().toLowerCase();
     if (k && /^[a-z0-9+]+$/.test(k)){
       if (!saved.includes(k)){ saved.push(k); localStorage.setItem("dss_custom_keys", JSON.stringify(saved)); addOpt(k); }
       sel.value = k;
@@ -1953,7 +2266,7 @@ function roomHistRender(){
     const name = document.createElement("input");
     name.type = "text";
     name.className = "rhist-name";
-    name.placeholder = "名前(任意)";
+    name.placeholder = T("名前(任意)");
     name.maxLength = 24;
     name.value = e.name || "";
     name.addEventListener("change", () => {
@@ -1963,23 +2276,23 @@ function roomHistRender(){
     });
 
     const use = document.createElement("button");
-    use.textContent = "選ぶ";
+    use.textContent = T("選ぶ");
     use.onclick = () => setRoomId(e.id);
 
     const del = document.createElement("button");
     del.className = "rhist-del";
     del.textContent = "×";
-    del.setAttribute("aria-label", "この部屋を履歴から消す");
+    del.setAttribute("aria-label", T("この部屋を履歴から消す"));
     del.onclick = () => {
       // 【確認を挟む理由】ルームIDはランダムな32文字で手では打ち直せず、
       // 一覧では途中を省いて表示しているので、消えたあとの手がかりも残らない。
       // 取り消しも無いため、1タップで失うのは重すぎる。
       // 【何が消えるのかを書く理由】「部屋そのものが消える」と読まれないように。
       // 消えるのはこの端末の一覧だけで、パソコン側の部屋はそのまま使える。
-      const what = (e.name ? "「" + e.name + "」\n" : "") + roomHistShortId(e.id);
-      if (!confirm("この部屋を履歴から消しますか?\n" + what +
-                   "\n\nパソコン側の部屋は消えません。この端末の一覧から消えるだけです。\n" +
-                   "ルームIDは長いので、控えが無いと入れ直せません。")) return;
+      const what = (e.name ? T("「{0}」", e.name) + "\n" : "") + roomHistShortId(e.id);
+      if (!confirm(T("この部屋を履歴から消しますか?\n{0}\n\n" +
+                     "パソコン側の部屋は消えません。この端末の一覧から消えるだけです。\n" +
+                     "ルームIDは長いので、控えが無いと入れ直せません。", what))) return;
       roomHistSave(roomHistLoad().filter(x => x.id !== e.id));
       roomHistRender();
     };
@@ -1989,7 +2302,7 @@ function roomHistRender(){
     const sub = document.createElement("div");
     sub.className = "rhist-sub";
     sub.textContent = roomHistShortId(e.id) + (e.at ? " · " + roomHistWhen(e.at) : "") +
-                      (e.id === roomId ? " · 使用中" : "");
+                      (e.id === roomId ? " · " + T("使用中") : "");
 
     row.appendChild(top); row.appendChild(sub);
     box.appendChild(row);
@@ -2129,10 +2442,12 @@ function setMuteLabel(){
   b.innerHTML = '<span class="bs">音' + st + '</span><span class="bl">' + icon + ' 音声</span>' + pill;
   b.title = "音声" + st;
   b.setAttribute("aria-pressed", on ? "true" : "false");
+  i18nApply(b);
   // 映像上のボタンは幅があるので常に完全な文言 + 札。
   const ov = $("ovMute");
   ov.innerHTML = icon + " 音声" + pill;
   ov.setAttribute("aria-pressed", on ? "true" : "false");
+  i18nApply(ov);
 }
 
 // コーデック切り替え: 設定を変えるだけ。次回 Start 時に反映される。
@@ -2235,7 +2550,7 @@ function autoAttempt(){
   // 無くなってしまう(繋がるまで Stop が押せない)。Stop だけは押せる状態に戻す。
   $("stop").disabled = false;
   const g = $("guide");
-  if (g) { g.textContent = "自動再接続中… (" + autoTries + "回目)"; g.className = "warn"; }
+  if (g) { g.textContent = T("自動再接続中… ({0}回目)", autoTries); g.className = "warn"; }
 }
 function autoSchedule(why){
   if (!autoArmed || autoTimer) return;
@@ -3016,7 +3331,7 @@ async function pollStats(){
     if (bufV != null && bufA != null) {
       avSkewMs = bufV - bufA; // 正=映像が遅れている
       const av = Math.round(avSkewMs);
-      if (Math.abs(av) >= 30) parts.push(`AVズレ:${av > 0 ? "映像+" : "音声+"}${Math.abs(av)}ms`);
+      if (Math.abs(av) >= 30) parts.push(T(av > 0 ? "AVズレ:映像+{0}ms" : "AVズレ:音声+{0}ms", Math.abs(av)));
     }
     // 経路の往復遅延(RTT)。ネットワーク自体の遅延の指標。
     if (sel && sel.currentRoundTripTime != null) {
@@ -3613,7 +3928,7 @@ function rsUpdateCount(){
     const nm = document.createElement("span");
     nm.textContent = "#" + s.i + " " + rsSlotDispName(s);
     const btn = document.createElement("button");
-    btn.textContent = "切断";
+    btn.textContent = T("切断");
     btn.onclick = () => { rsLog(`視聴者を切断しました (room ${rsPad3(s.i)})`); rsResetSlot(s); };
     row.appendChild(nm); row.appendChild(btn);
     box.appendChild(row);
@@ -3664,7 +3979,7 @@ function rsWireComment(slot, ch){
     slot.lastCmt = now;
     const color = /^#[0-9a-fA-F]{6}$/.test(String(m.color || "")) ? m.color : "";
     const c = {
-      name: String(m.name || "名無し").slice(0, 20),
+      name: String(m.name || T("名無し")).slice(0, 20),
       text: String(m.text || "").slice(0, 200),
       color,
       icon: rsValidIcon(m.icon),
@@ -3702,7 +4017,7 @@ function rsAddComment(c, roomNo){
 }
 
 // 視聴者の表示名。先行入室(名前入力前)は空文字なので「ユーザー名未入力」と表示する
-function rsSlotDispName(slot){ return slot.name || "ユーザー名未入力"; }
+function rsSlotDispName(slot){ return slot.name || T("ユーザー名未入力"); }
 
 // ---- 入退室のシステム表示(コメント欄・配信側のみ。視聴者へは中継せず履歴にも残さない) ----
 // remember=true のとき、後から名前が届いた際に書き換えられるようDOM参照をslotに保持する
@@ -3715,7 +4030,7 @@ function rsAddSystemComment(slot, suffix, remember){
   head.className = "rs-cmeta";
   head.textContent = new Date().toLocaleTimeString() + " ";
   const body = document.createElement("span");
-  body.textContent = rsSlotDispName(slot) + " (#" + slot.i + ") " + suffix; // textContentでHTML解釈を防ぐ
+  body.textContent = rsSlotDispName(slot) + " (#" + slot.i + ") " + T(suffix); // textContentでHTML解釈を防ぐ
   div.appendChild(head); div.appendChild(body);
   box.insertBefore(div, box.firstChild);
   while (box.childElementCount > RS_MAX_COMMENTS) box.removeChild(box.lastChild);
@@ -3727,7 +4042,7 @@ function rsUpdateJoinComment(slot){
   if (!div || !div.isConnected) return; // 上限超過で消えていたら何もしない
   try {
     div.replaceChild(rsAvatarEl({ icon: slot.icon, name: slot.name }), div.firstChild);
-    div.lastChild.textContent = rsSlotDispName(slot) + " (#" + slot.i + ") " + (slot.joinSuffix || "さんが入室しました");
+    div.lastChild.textContent = rsSlotDispName(slot) + " (#" + slot.i + ") " + T(slot.joinSuffix || "さんが入室しました");
   } catch(e){}
 }
 
@@ -3773,7 +4088,7 @@ async function rsFillRosterConn(slot){
     if (!pair) return;
     const rc = stats.get(pair.remoteCandidateId);
     if (!rc) return;
-    const kind = rc.candidateType === "relay" ? "TURN経由" : "P2P";
+    const kind = rc.candidateType === "relay" ? T("TURN経由") : "P2P";
     const addr = (rc.address || rc.ip || "?") + (rc.port ? ":" + rc.port : "");
     const e = rsRoster.find(x => x.id === id);
     if (e){ e.conn = kind + " " + addr; rsRenderRoster(); }
@@ -3783,7 +4098,7 @@ function rsRenderRoster(){
   const box = $("rsRoster");
   if (!box) return;
   box.textContent = "";
-  if (!rsRoster.length){ box.textContent = "まだ視聴者はいません"; return; }
+  if (!rsRoster.length){ box.textContent = T("まだ視聴者はいません"); return; }
   for (const e of rsRoster){
     const div = document.createElement("div");
     div.className = "rs-roster-row" + (e.leaveTs ? " left" : "");
@@ -3791,8 +4106,8 @@ function rsRenderRoster(){
     const t = document.createElement("span");
     const jt = new Date(e.joinTs).toLocaleTimeString();
     const lt = e.leaveTs ? new Date(e.leaveTs).toLocaleTimeString() : "";
-    t.textContent = e.name + " (#" + e.room + ")  入室 " + jt +
-                    (lt ? "  退室 " + lt : "  視聴中") + (e.conn ? "  [" + e.conn + "]" : "");
+    t.textContent = e.name + " (#" + e.room + ")  " + T("入室") + " " + jt +
+                    (lt ? "  " + T("退室") + " " + lt : "  " + T("視聴中")) + (e.conn ? "  [" + e.conn + "]" : "");
     div.appendChild(t);
     box.appendChild(div);
   }
@@ -3850,7 +4165,7 @@ async function rsStart(){
   rsSlots = new Array(rooms);
   for (let i = 1; i <= rooms; i++) rsOpenSlot(i);
   rsShowShareUrl(); // 視聴用URL/QRを表示(開始前と同じ内容)
-  $("rsToggle").textContent = "⏹ 再配信を停止";
+  $("rsToggle").textContent = T("⏹ 再配信を停止");
   $("rsMic").disabled = !rsMicTrack;
   rsUpdateDeskAudioBtn();
   $("rsRooms").disabled = true;
@@ -3888,7 +4203,7 @@ function rsStop(){
   }
   rsSlots = [];
   rsStopMedia();
-  $("rsToggle").textContent = "📡 再配信を開始";
+  $("rsToggle").textContent = T("📡 再配信を開始");
   $("rsMic").disabled = true;
   $("rsRooms").disabled = false;
   rsShowShareUrl(); // 停止後も視聴用URLは見えるようにしておく
@@ -3910,14 +4225,14 @@ function rsShowQR(url){
   const sc = document.createElement("script");
   sc.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
   sc.onload = make;
-  sc.onerror = () => { $("rsQr").textContent = "QR生成ライブラリを読み込めませんでした。URLをコピーして共有してください。"; };
+  sc.onerror = () => { $("rsQr").textContent = T("QR生成ライブラリを読み込めませんでした。URLをコピーして共有してください。"); };
   document.head.appendChild(sc);
 }
 $("rsToggle").onclick = () => { if (rsOn) rsStop(); else rsStart(); };
 $("rsMic").onclick = () => {
   rsMuted = !rsMuted;
   if (rsMicTrack) rsMicTrack.enabled = !rsMuted; // マイクは独立トラックなので enabled で即消音
-  $("rsMic").textContent = rsMuted ? "🔇 ミュート中" : "🎙 マイクON";
+  $("rsMic").textContent = T(rsMuted ? "🔇 ミュート中" : "🎙 マイクON");
 };
 $("rsRooms").addEventListener("input", () => { if (!rsOn) rsShowShareUrl(); });
 $("rsSource").addEventListener("change", rsSwitchSource);
@@ -4129,11 +4444,11 @@ $("recBtn").onclick = () => {
   recorder.onstop = () => {
     dlBlob(new Blob(recChunks, { type: "video/webm" }), "dss_" + tsStamp() + ".webm");
     recorder = null; recChunks = [];
-    $("recBtn").innerHTML = '<span class="bs">録画</span><span class="bl">⏺ 録画</span>'; $("recBtn").classList.remove("rec-on");
+    $("recBtn").innerHTML = '<span class="bs">録画</span><span class="bl">⏺ 録画</span>'; $("recBtn").classList.remove("rec-on"); i18nApply($("recBtn"));
     log("録画を保存しました(webm)");
   };
   recorder.start(1000);
-  $("recBtn").innerHTML = '<span class="bs">録画中</span><span class="bl">⏹ 録画中</span>'; $("recBtn").classList.add("rec-on");
+  $("recBtn").innerHTML = '<span class="bs">録画中</span><span class="bl">⏹ 録画中</span>'; $("recBtn").classList.add("rec-on"); i18nApply($("recBtn"));
   log("録画を開始しました(この端末に保存されます。音声はミュート解除中のみ)");
 };
 
@@ -4148,7 +4463,7 @@ let rxClip = "";
 $("clipToPc").onclick = async () => {
   let t = "";
   try { t = await navigator.clipboard.readText(); } catch(e){}
-  if (!t) t = prompt("PCへ送るテキストを貼り付けてください") || "";
+  if (!t) t = prompt(T("PCへ送るテキストを貼り付けてください")) || "";
   if (!t) return;
   sendControl({ type: "clip", text: t.slice(0, 100000) });
   log("クリップボードをPCへ送信しました");
@@ -4156,7 +4471,7 @@ $("clipToPc").onclick = async () => {
 $("clipFromPc").onclick = async () => {
   if (!rxClip) return;
   try { await navigator.clipboard.writeText(rxClip); log("PCのコピーをこの端末に保存しました"); }
-  catch(e){ prompt("自動コピーできない環境です。長押しでコピーしてください", rxClip); }
+  catch(e){ prompt(T("自動コピーできない環境です。長押しでコピーしてください"), rxClip); }
 };
 
 // ================= リモートカーソル形状 =================
@@ -4243,7 +4558,7 @@ function rsApplyMask(){
   const draw = () => {
     ctx.fillStyle = "#0d1116"; ctx.fillRect(0, 0, 1280, 720);
     ctx.fillStyle = "#8a93a0"; ctx.font = "44px sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("画面は一時的に非表示です", 640, 360);
+    ctx.fillText(T("画面は一時的に非表示です"), 640, 360);
   };
   draw();
   if (rsMaskTimer) clearInterval(rsMaskTimer);
@@ -4269,15 +4584,15 @@ $("fileSend").addEventListener("change", async (e) => {
   let sent = 0;
   const prog = $("fileProg");
   while (sent < buf.byteLength){
-    if (!control || control.readyState !== "open"){ prog.textContent = "切断のため中断しました"; e.target.value = ""; return; }
+    if (!control || control.readyState !== "open"){ prog.textContent = T("切断のため中断しました"); e.target.value = ""; return; }
     // 送信バッファの詰まり対策: 溜まっていたら少し待つ
     if (control.bufferedAmount > 1024 * 1024){ await new Promise(r => setTimeout(r, 50)); continue; }
     control.send(buf.slice(sent, sent + CHUNK));
     sent += CHUNK;
-    prog.textContent = "送信中… " + Math.min(100, Math.round(sent / buf.byteLength * 100)) + "%";
+    prog.textContent = T("送信中… {0}%", Math.min(100, Math.round(sent / buf.byteLength * 100)));
   }
   sendControl({ type: "file-end" });
-  prog.textContent = "送信完了(保存結果はログに表示されます)";
+  prog.textContent = T("送信完了(保存結果はログに表示されます)");
   e.target.value = "";
 });
 
@@ -4379,7 +4694,7 @@ function bcSendComment(){
   const text = $("bcText").value.trim().slice(0, 200);
   if (!text) return;
   if (!rsOn){ rsLog("再配信を開始してから送信してください"); return; }
-  const c = { name: "配信者", text, color: "#ffd479", icon: "", host: true, ts: Date.now() };
+  const c = { name: T("配信者"), text, color: "#ffd479", icon: "", host: true, ts: Date.now() };
   rsAddComment(c, 0);
   rsPushHistory(c);
   rsRelayAll(c);
@@ -4454,7 +4769,7 @@ function rsTeardownAudioMix(){
 function rsUpdateDeskAudioBtn(){
   const b = $("rsDeskAudio");
   if (!b) return;
-  b.textContent = rsDeskAudioOn ? "🔊 PC音声ON" : "🔊 PC音声OFF";
+  b.textContent = T(rsDeskAudioOn ? "🔊 PC音声ON" : "🔊 PC音声OFF");
   b.classList.toggle("rec-on", rsDeskAudioOn); // ONを目立たせる(録画中と同じ強調)
 }
 $("rsDeskAudio").onclick = () => {
@@ -4608,7 +4923,7 @@ const NAT_HINT = "Wi-Fiに切り替えるか、別の回線をお試しくださ
 
 function natShowWarn(why){
   const el = $("netWarn");
-  if (el){ el.textContent = "⚠ " + why + " " + NAT_HINT; el.style.display = ""; }
+  if (el){ el.textContent = "⚠ " + T(why) + " " + T(NAT_HINT); el.style.display = ""; }
   log("⚠ " + why);
 }
 
@@ -4617,7 +4932,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.8";
+const CLIENT_VERSION = "v0.7.9";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -4647,7 +4962,7 @@ const CLIENT_VERSION = "v0.7.8";
     return z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds());
   }
   function blog(msg){ try { log(ts() + " [バックグラウンド] " + msg); } catch(e){} }
-  function setState(t){ const o = $("bgKeepState"); if (o) o.textContent = t; }
+  function setState(t){ const o = $("bgKeepState"); if (o) o.textContent = T(t); }
 
   function connState(){
     try { return pc ? pc.connectionState : "未接続"; } catch(e){ return "不明"; }
@@ -4702,7 +5017,7 @@ const CLIENT_VERSION = "v0.7.8";
     try {
       if (window.MediaMetadata) {
         navigator.mediaSession.metadata = new MediaMetadata({
-          title: "DesktopStream", artist: "リモート操作中"
+          title: "DesktopStream", artist: T("リモート操作中")
         });
       }
       navigator.mediaSession.playbackState = "playing";
