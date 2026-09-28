@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='%232ecf8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E %3Crect x='2' y='3' width='20' height='14' rx='2'/%3E %3Cpath d='M12 17v3M8 20h8'/%3E %3Cpath d='M4 4l7.07 17 2.51-7.39L21 11.06z' fill='%232ecf8e' stroke='none' transform='translate(6.8 3.8) scale(0.5)'/%3E %3C/svg%3E" />
+<title>Quick Start | Desktop Stream</title>
+<style>
+  :root { --accent:#2f6b4f; --accent2:#4a9e77; --bg:#f7f9f8; --card:#ffffff; --text:#233; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.9; }
+  header { background:linear-gradient(135deg,#1c3a2e,#2f6b4f); color:#fff; padding:36px 20px; text-align:center; }
+  header h1 { margin:0 0 6px; font-size:26px; }
+  header p { margin:0; opacity:.9; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 60px; }
+  .step { background:var(--card); border-radius:14px; padding:20px 22px; margin:18px 0;
+          box-shadow:0 2px 10px rgba(0,0,0,.06); border-left:6px solid var(--accent2); }
+  .step h2 { margin:0 0 10px; font-size:18px; display:flex; align-items:center; gap:10px; }
+  .num { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px;
+         border-radius:50%; background:var(--accent); color:#fff; font-size:16px; flex:none; }
+  .tip { background:#eef7f2; border-radius:10px; padding:10px 14px; font-size:14px; margin-top:10px; }
+  .tip::before { content:"💡 "; }
+  .warn { background:#fdf3e7; border-radius:10px; padding:10px 14px; font-size:14px; margin-top:10px; }
+  .warn::before { content:"⚠️ "; }
+  code { background:#eef1f0; padding:2px 8px; border-radius:6px; font-size:14px; }
+  kbd { background:#233; color:#fff; padding:2px 8px; border-radius:6px; font-size:13px; }
+  a { color:var(--accent); }
+  footer { text-align:center; font-size:13px; color:#889; padding:20px; }
+  .goal { background:#fff; border:2px dashed var(--accent2); border-radius:14px; padding:16px 20px; margin:18px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🖥️ Desktop Stream Quick Start</h1>
+  <p>Show your PC's screen on your phone in 5 minutes</p>
+  <p style="margin-top:8px;font-size:14px"><a href="quickstart.html" lang="ja" style="color:#fff">日本語</a></p>
+</header>
+<main>
+
+  <div class="goal">
+    <b>Goal of this guide:</b> view your Windows PC's desktop and hear its sound in your phone's browser.
+    There are no difficult settings. Follow the steps from the top.
+  </div>
+
+  <div class="step">
+    <h2><span class="num">1</span>Install it on the PC</h2>
+    <p>Run the <code>DesktopStream-…-setup.exe</code> you downloaded.
+    When Windows asks "Do you want to allow this app to make changes to your device?", choose "Yes".</p>
+    <p>When the installation finishes, DesktopStream is registered as a service and starts automatically.
+    You are ready when its icon appears in the taskbar tray. From now on it starts listening whenever the PC starts.</p>
+    <div class="tip">Administrator permission is needed at this prompt (UAC) so that the phone can also control Task Manager and the UAC prompt itself.</div>
+    <div class="tip">For the portable version (<code>…-portable.zip</code>), right-click <code>install-service.bat</code> in the extracted folder and choose "Run as administrator".</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">2</span>Show the room ID</h2>
+    <p>Right-click the tray icon and choose "Open console". The console shows the room ID (letters and numbers) and QR codes.</p>
+    <div class="warn">The room ID is a passphrase. Anyone who knows it can connect to your screen, so do not show it to others.</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">3</span>Open the client on your phone</h2>
+    <p>Open this page in your phone's browser.</p>
+    <p><code>https://brad-55.github.io/DesktopStream/client.html</code></p>
+    <p>You can also open it by scanning the "Connection URL" QR code in the console.</p>
+    <div class="tip">On the same Wi-Fi, <code>https://PC-IP-address:8080</code> also works (no room ID needed).
+    In that case the browser shows a warning the first time because the certificate is self-signed; continue past it (in Chrome: "Advanced" → "Proceed").</div>
+    <div class="tip">The page appears in English when the phone's language is not Japanese. You can change it in "言語 / Language" in the Settings tab.</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">4</span>Load the room ID</h2>
+    <p>On the phone, press "Enter room ID", choose "📷 Scan QR with camera",
+    and point the camera at the room ID QR code from step 2. Once it is read, the connection starts automatically.</p>
+    <div class="tip">If the camera cannot be used, type the ID shown in the console into the box and press "OK".</div>
+    <div class="warn">The first time a device connects, a dialog asking whether to allow the connection appears on the PC. Nothing happens until someone presses "Yes".</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">5</span>Start streaming</h2>
+    <p>Once connected, press the Start button. If the PC's screen appears on the phone, you are done 🎉</p>
+    <p>To hear sound, press the audio button so it shows "Audio ON".
+    The button shows the <b>current state</b>. It starts muted, so it first shows "Audio OFF".</p>
+    <div class="tip">If the video stutters, lower the bitrate (quality) number and press Start again.</div>
+  </div>
+
+  <div class="step">
+    <h2><span class="num">＋</span>Control it with the mouse</h2>
+    <p>The pad at the bottom of the screen works right away.
+    Slide to move the pointer, tap to left-click, and long-press to right-click.
+    To type text, switch the "Input" drop-down to text input.</p>
+    <p>When you control from a computer, nothing needs switching: just move the mouse over the video.</p>
+    <div class="tip">To show the screen you are receiving to other people with comments, use the Restream tab (see the User Guide for details).</div>
+  </div>
+
+  <p style="text-align:center; margin-top:28px;">
+    For more details, see the <a href="guide.en.html"><b>User Guide</b></a>
+  </p>
+</main>
+<footer>Desktop Stream — Quick Start Guide</footer>
+</body>
+</html>
