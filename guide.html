@@ -37,6 +37,7 @@
 <header>
   <h1>📖 Desktop Stream 詳細ガイド</h1>
   <p>各機能の説明と、困ったときの対処</p>
+  <p style="margin-top:8px;font-size:14px"><a href="guide.en.html" lang="en" style="color:#fff">English</a></p>
 </header>
 <nav>
   <ul>
@@ -109,6 +110,7 @@
     <tr><td>ルームID入力</td><td>どこでもモードの合言葉を設定する(QR・写真・文字)</td></tr>
     <tr><td>stats</td><td>通信状態。lost=届かなかったデータの数、srvCPU=パソコンの負荷</td></tr>
   </table>
+  <p class="note">画面は、スマホの言語に合わせて日本語か英語で表示されます。選ぶときは、設定タブの先頭の「言語 / Language」を使います。</p>
 </section>
 
 <section id="codec">
@@ -213,6 +215,7 @@
   🎬動画(パソコンの音)と🎙配信者マイクの音量を別々に調整できます(最初はマイクの方が大きめです)。
   配信タイトルは映像の下部に重ねて表示され、映像をタップすると表示と非表示が切り替わります。
   「⛶ 全画面」で全画面表示になり、全画面中は右上の「✕ 全画面を終了」で戻れます。</p>
+  <p class="note">視聴する画面は、視聴者のブラウザの言語に合わせて日本語か英語で表示されます。</p>
   <div class="tip">人数が多いほど、配信するスマホの負荷と通信量(1人あたり約500kbps)が増えます。まずは2〜3人で試してください。
   スマホをバックグラウンドにして配信が乱れても、画面に戻れば映像と音声を自動で取り直します。</div>
 </section>
@@ -331,6 +334,7 @@
     <tr><td><code>no_tls</code></td><td>暗号化なし(http)で待ち受ける。証明書の警告を越えられないときに、原因を切り分けるためのもの。
       ただし、IPアドレスで開いた場合はマイクとカメラが使えなくなります</td></tr>
     <tr><td><code>worker_as_user</code></td><td>従来の権限で動かす。UAC画面・ロック画面は映らなくなります</td></tr>
+    <tr><td><code>lang_en</code> / <code>lang_ja</code></td><td>PC 側(トレイ・承認ダイアログ・コンソール)の表示言語を固定する。コンソールの「言語 / Language」からも選べます</td></tr>
   </table>
   <p class="note">メモ帳で作ると <code>no_tls.txt</code> のように拡張子が付きますが、そのままで認識されます。</p>
 
