@@ -1,5 +1,7 @@
 # DesktopStream
 
+日本語 | [English](README.en.md)
+
 Windows PC の画面を、スマホや別の PC から見たり操作したりするソフトです。
 
 - UAC の確認画面やロック画面も表示・操作できます。管理者の確認が出ても、外出先から先へ進められます
@@ -46,7 +48,7 @@ Windows PC の画面を、スマホや別の PC から見たり操作したり�
 正しい値は、各リリースのリリースノートに載せています。
 
 ```powershell
-Get-FileHash .\DesktopStream-v0.8.0-setup.exe -Algorithm SHA256
+Get-FileHash .\DesktopStream-v0.8.1-setup.exe -Algorithm SHA256
 ```
 
 ファイル名は、ダウンロードした版に合わせて変えてください。
