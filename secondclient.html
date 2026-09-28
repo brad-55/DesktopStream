@@ -277,6 +277,134 @@
 "use strict";
 const AYAME_URL = "wss://ayame-labo.shiguredo.app/signaling";
 const $ = (id) => document.getElementById(id);
+// ================= 表示言語(英語対応) =================
+// 【ここに置く理由】読み込み時に通る処理が T() を呼ぶ。宣言より前に参照すると
+// TDZ違反でスクリプト全体が止まる(過去に踏んだ地雷)。
+// 【仕組み】辞書のキーは日本語の原文そのもの。日本語のときは何もしない。
+// 辞書に無い文言は日本語のまま出るだけで、壊れはしない。
+// 固定のマークアップは読み込み時に1回だけ完全一致で置き換え、JS で書く文言は T() を通す。
+// 【ログは訳さない】log() は利用者から開発者へ送られる診断情報のため日本語のまま。
+// 設計と、採らなかった案(書き込みの監視・data-i18n 属性)は docs/project/i18n-design.md。
+// 【辞書は視聴クライアント専用】画面が別物なので操作クライアントとは共有しない。
+// 仕組み(LANG / T / i18nApply)は操作クライアントと同じ。言語の選択欄は置かない
+// (視聴者は共有されたURLから来るので、ブラウザの言語に従えば足りる。?lang= でも切り替えられる)。
+const LANG = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get("lang");
+    if (q === "ja" || q === "en") return q;
+    const s = localStorage.getItem("dss_lang");
+    if (s === "ja" || s === "en") return s;
+  } catch(e){}
+  const n = (navigator.languages && navigator.languages[0]) || navigator.language || "";
+  if (!n) return "ja"; // 判定できなければ日本語
+  return /^ja/i.test(n) ? "ja" : "en";
+})();
+// "@" で始まるキーは属性(title / placeholder / aria-label / alt)専用の訳。
+// 同じ原文でも、狭いボタンの短い文言とツールチップでは別の訳が要るため。
+const I18N_EN = {
+  "DESKTOP STREAM 視聴": "DESKTOP STREAM Viewer",
+  "Desktop Stream — 視聴": "Desktop Stream — Viewer",
+  "準備中…": "Preparing…",
+  "ユーザー名を入力してください": "Enter your name",
+  "アイコンを選ぶ(任意)": "Choose an icon (optional)",
+  "視聴をはじめる": "Start watching",
+  "配信を探しています…": "Looking for the stream…",
+  "✕ 全画面を終了": "✕ Exit fullscreen",
+  "↻ もう一度さがす": "↻ Search again",
+  "🎬動画": "🎬 Video",
+  "🔇 音声": "🔇 Audio",
+  "🔊 音声": "🔊 Audio",
+  "🎙配信者マイク": "🎙 Streamer mic",
+  "⛶ 全画面": "⛶ Fullscreen",
+  "送信": "Send",
+  "@クライアントのバージョン": "Client version",
+  "@名前": "Name",
+  "@合言葉": "Passphrase",
+  "@全画面を終了": "Exit fullscreen",
+  "@動画音声の音量": "Video audio volume",
+  "@配信者マイクの音量": "Streamer mic volume",
+  "@全画面表示": "Fullscreen",
+  "@コメント一覧": "Comments",
+  "@アイコンを変更": "Change icon",
+  "@コメントの色": "Comment color",
+  "@コメントを入力": "Write a comment",
+  // ---- 状態と案内 ----
+  "URLが不正です": "Invalid URL",
+  "視聴用URLが正しくありません(roomパラメータを確認してください)": "The viewer URL is not valid (check the room parameter)",
+  "さがしています… {0}/{1}": "Searching… {0}/{1}",
+  "配信を探しています… ({0}/{1})": "Looking for the stream… ({0}/{1})",
+  "満員です": "Full",
+  "満員のため入室できませんでした。しばらくしてからお試しください。": "The stream is full. Please try again later.",
+  "配信が見つかりません": "Stream not found",
+  "配信が見つかりませんでした。配信中か、URLが正しいか確認してください。": "Could not find the stream. Check that it is live and that the URL is correct.",
+  "接続が切れました": "Disconnected",
+  "視聴中": "Watching",
+  "名無し": "Anonymous",
+  "配信は終了しました": "The stream has ended",
+  "この配信には合言葉が必要です": "This stream requires a passphrase",
+  "終了": "Ended",
+  "切断": "Disconnected",
+  "再接続できませんでした": "Could not reconnect",
+  "再接続します… ({0}回目)": "Reconnecting… (attempt {0})",
+  "{0}。自動で再接続します…": "{0}. Reconnecting automatically…",
+  "この回線は直接つながらない形式(対称型NAT)です": "This network cannot connect directly (symmetric NAT).",
+  "{0} の回線です。直接つながらないことがあります": "You are on {0}. Direct connections may fail.",
+  "楽天モバイル": "Rakuten Mobile",
+  "Wi-Fiに切り替えるか、別の回線をお試しください。": "Try switching to Wi-Fi or another network.",
+};
+const I18N_HAS = (k) => Object.prototype.hasOwnProperty.call(I18N_EN, k);
+// {0} を含むキーは、文字列を連結して作る文言と照合するための型。
+// 取り出した値も辞書で訳す(「動作中 / 接続=未接続」の「未接続」など)。
+const I18N_PAT = LANG !== "en" ? [] : Object.keys(I18N_EN).filter(k => /\{\d\}/.test(k)).map(k => {
+  const idx = [];
+  const src = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+               .replace(/\\\{(\d)\\\}/g, (_, d) => { idx.push(+d); return "(.+?)"; });
+  return [new RegExp("^" + src + "$"), k, idx];
+});
+// T("原文") / T("…{0}…", 値)。日本語では原文(と値の埋め込み)をそのまま返す。
+function T(s, ...a){
+  s = String(s);
+  if (LANG === "en"){
+    if (!a.length){
+      const k = s.trim().replace(/\s+/g, " ");
+      if (I18N_HAS(k)) return I18N_EN[k];
+      for (const [re, key, idx] of I18N_PAT){
+        const m = k.match(re);
+        if (m){ idx.forEach((d, i) => { a[d] = T(m[i + 1]); }); s = I18N_EN[key]; break; }
+      }
+      if (!a.length) return s;
+    } else if (I18N_HAS(s)) s = I18N_EN[s];
+  }
+  return a.length ? s.replace(/\{(\d)\}/g, (_, d) => (a[d] !== undefined ? a[d] : "")) : s;
+}
+// 要素の中の文字と属性を、辞書の完全一致で置き換える。
+// 読み込み時に body 全体へ1回。innerHTML で組み立て直した要素にも使う
+// (音声ボタンや録画ボタンは span 構造ごと書き直すため)。
+// 照合は前後の空白を除き、内部の連続空白を1つにまとめてから行う。前後の空白は残す。
+function i18nApply(root){
+  if (LANG !== "en" || !root) return;
+  const skip = (el) => el.closest("script,style,textarea,#log,[data-noi18n]");
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  for (let n = w.currentNode; n; n = w.nextNode()){
+    if (n.nodeType === 3){
+      const p = n.parentElement;
+      if (!p || skip(p)) continue;
+      const v = n.nodeValue, k = v.trim().replace(/\s+/g, " ");
+      if (!k || !I18N_HAS(k)) continue;
+      n.nodeValue = v.match(/^\s*/)[0] + I18N_EN[k] + v.match(/\s*$/)[0];
+    } else if (n.nodeType === 1 && !skip(n)){
+      for (const at of ["title", "placeholder", "aria-label", "alt"]){
+        const v = n.getAttribute(at);
+        if (!v) continue;
+        const k = v.trim().replace(/\s+/g, " ");
+        if (I18N_HAS("@" + k)) n.setAttribute(at, I18N_EN["@" + k]);
+        else if (I18N_HAS(k)) n.setAttribute(at, I18N_EN[k]);
+      }
+    }
+  }
+}
+if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(document.title); i18nApply(document.body); }
+
 
 // ================= バージョン表示 =================
 // このクライアント自身の版。**リリースのたびに手で上げること**。
@@ -284,7 +412,7 @@ const $ = (id) => document.getElementById(id);
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.2";
+const CLIENT_VERSION = "v0.7.3";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -306,11 +434,11 @@ let ended = false;
 
 function pad3(n){ return String(n).padStart(3, "0"); }
 function setStatus(text, cls){
-  $("status").textContent = text;
+  $("status").textContent = T(text);
   $("dot").className = cls || "";
 }
 function setOverlay(text){
-  $("ovMsg").textContent = text || "";
+  $("ovMsg").textContent = T(text || "");
   $("ovMsg").style.display = text ? "" : "none";
 }
 function enableComment(on){
@@ -508,7 +636,7 @@ async function natLookupCarrier(ip){
 const NAT_HINT = "Wi-Fiに切り替えるか、別の回線をお試しください。";
 function natShowWarn(why){
   const el = document.getElementById("netWarn");
-  if (el){ el.textContent = "⚠ " + why + " " + NAT_HINT; el.style.display = ""; }
+  if (el){ el.textContent = "⚠ " + T(why) + " " + T(NAT_HINT); el.style.display = ""; }
 }
 
 async function startPeer(){
@@ -559,7 +687,7 @@ async function startPeer(){
     // 名前入力ゲート表示中(先行入室)は名前を空+pendingで送り、入力後に type:"name" で更新する。
     const pending = gateOpen();
     const nm = pending ? "" :
-      ($("cmName").value.trim() || localStorage.getItem("dss_view_name") || "名無し").slice(0, 20);
+      ($("cmName").value.trim() || localStorage.getItem("dss_view_name") || T("名無し")).slice(0, 20);
     try {
       dc.send(JSON.stringify({
         type: "hello",
@@ -583,7 +711,7 @@ async function startPeer(){
       // タイトル表示と、途中参加でも読めるようにコメント履歴を反映
       const t = String(m.title || "").slice(0, 40);
       $("bTitle").textContent = t;
-      if (t) document.title = t + " - 視聴中";
+      if (t) document.title = t + " - " + T("視聴中");
       if (Array.isArray(m.list)){
         $("comments").innerHTML = "";
         for (const c of m.list) addComment(c.name, c.text, c.ts, c.color, c.icon, c.host);
@@ -716,7 +844,7 @@ function avatarEl(name, color, icon, host){
   return av;
 }
 function addComment(name, text, ts, color, icon, host){
-  name = String(name || "名無し").slice(0, 20);
+  name = String(name || T("名無し")).slice(0, 20);
   text = String(text || "").slice(0, 200);
   if (!text.trim()) return;
   const box = $("comments");
@@ -744,7 +872,7 @@ function addComment(name, text, ts, color, icon, host){
 function sendComment(){
   const text = $("cmText").value.trim();
   if (!text || !dc || dc.readyState !== "open") return;
-  const name = $("cmName").value.trim().slice(0, 20) || "名無し";
+  const name = $("cmName").value.trim().slice(0, 20) || T("名無し");
   localStorage.setItem("dss_view_name", name);
   // 自分のコメントも配信側から全員へ中継されて戻ってくるので、ここでは表示しない
   dc.send(JSON.stringify({ type: "comment", name, text, color: $("cmColor").value, icon: myIcon() }));
@@ -853,6 +981,7 @@ function setViewMuteLabel(){
   b.innerHTML = (on ? "🔊" : "🔇") + ' 音声<span class="sw' + (on ? " on" : "") + '">' +
                 (on ? "ON" : "OFF") + '</span>';
   b.setAttribute("aria-pressed", on ? "true" : "false");
+  i18nApply(b);
 }
 $("retry").onclick = () => { $("retry").classList.remove("on"); retryCount = 0; scan(); };
 
@@ -933,7 +1062,7 @@ setIconPreview();
 // ゲート表示中でも入室(Ayame接続)は先に試みる。映像は受信するが再生はしない。
 function gateOpen(){ return $("nameGate").style.display !== "none"; }
 function showGate(title, needPass){
-  $("ngTitle").textContent = title || "ユーザー名を入力してください";
+  $("ngTitle").textContent = T(title || "ユーザー名を入力してください");
   $("ngPass").style.display = needPass ? "" : "none";
   $("ngName").value = localStorage.getItem("dss_view_name") || "";
   $("ngPass").value = localStorage.getItem("dss_view_pass") || "";
