@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='%232ecf8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E %3Crect x='2' y='3' width='20' height='14' rx='2'/%3E %3Cpath d='M12 17v3M8 20h8'/%3E %3Cpath d='M4 4l7.07 17 2.51-7.39L21 11.06z' fill='%232ecf8e' stroke='none' transform='translate(6.8 3.8) scale(0.5)'/%3E %3C/svg%3E" />
+<title>User Guide | Desktop Stream</title>
+<style>
+  :root { --accent:#2f6b4f; --accent2:#4a9e77; --bg:#f7f9f8; --card:#fff; --text:#233; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif;
+         background:var(--bg); color:var(--text); line-height:1.9; }
+  header { background:linear-gradient(135deg,#1c3a2e,#2f6b4f); color:#fff; padding:32px 20px; text-align:center; }
+  header h1 { margin:0 0 6px; font-size:24px; }
+  nav { background:#fff; border-bottom:1px solid #e2e8e5; position:sticky; top:0; }
+  nav ul { display:flex; flex-wrap:wrap; gap:4px; list-style:none; margin:0; padding:8px 12px; max-width:860px; margin-inline:auto; }
+  nav a { display:block; padding:6px 12px; border-radius:8px; text-decoration:none; color:var(--accent); font-size:14px; }
+  nav a:hover { background:#eef7f2; }
+  main { max-width:860px; margin:0 auto; padding:20px 16px 70px; }
+  section { background:var(--card); border-radius:14px; padding:22px 24px; margin:20px 0;
+            box-shadow:0 2px 10px rgba(0,0,0,.06); }
+  h2 { margin:0 0 12px; font-size:20px; color:var(--accent); border-bottom:2px solid #e6efe9; padding-bottom:8px; }
+  h3 { font-size:16px; margin:18px 0 8px; }
+  table { border-collapse:collapse; width:100%; font-size:14px; margin:10px 0; }
+  th,td { border:1px solid #dfe7e2; padding:8px 10px; text-align:left; }
+  th { background:#eef7f2; }
+  .tip { background:#eef7f2; border-radius:10px; padding:10px 14px; font-size:14px; margin:10px 0; }
+  .tip::before { content:"💡 "; }
+  .warn { background:#fdf3e7; border-radius:10px; padding:10px 14px; font-size:14px; margin:10px 0; }
+  .warn::before { content:"⚠️ "; }
+  code { background:#eef1f0; padding:2px 8px; border-radius:6px; font-size:14px; }
+  a { color:var(--accent); }
+  footer { text-align:center; font-size:13px; color:#889; padding:20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📖 Desktop Stream User Guide</h1>
+  <p>How each feature works, and what to do when something goes wrong</p>
+  <p style="margin-top:8px;font-size:14px"><a href="guide.html" lang="ja" style="color:#fff">日本語</a></p>
+</header>
+<nav>
+  <ul>
+    <li><a href="#about">What is this?</a></li>
+    <li><a href="#modes">Two ways to connect</a></li>
+    <li><a href="#room">Room ID</a></li>
+    <li><a href="#ui">The screen</a></li>
+    <li><a href="#codec">Quality and settings</a></li>
+    <li><a href="#mouse">Mouse and input</a></li>
+    <li><a href="#restream">Restream</a></li>
+    <li><a href="#conv">Handy features</a></li>
+    <li><a href="#trouble">Troubleshooting</a></li>
+  </ul>
+</nav>
+<main>
+
+<section id="about">
+  <h2>What is this?</h2>
+  <p>Desktop Stream streams the screen and sound of a Windows PC to a phone's browser in real time.
+  The phone only needs a browser; there is no app to install. You can also control the PC's mouse from the phone.</p>
+  <p>Video travels directly between the PC and the phone (P2P), so it is never stored on an outside server.</p>
+  <p>On the PC, Desktop Stream runs as a Windows service and starts listening automatically when the PC starts. You do not need to launch it each time.
+  <b>It can also show and control the UAC prompt and the lock screen.</b></p>
+</section>
+
+<section id="modes">
+  <h2>Two ways to connect</h2>
+  <table>
+    <tr><th></th><th>Home mode (LAN/VPN)</th><th>Anywhere mode (remote)</th></tr>
+    <tr><td>When to use</td><td>On the same Wi-Fi, or over Tailscale</td><td>From outside, on a different network</td></tr>
+    <tr><td>How to open</td><td><code>https://PC-IP:8080</code> (allow the certificate warning the first time)</td><td>Open the published page: <code>https://brad-55.github.io/DesktopStream/client.html</code></td></tr>
+    <tr><td>Room ID</td><td>Not needed</td><td>Needed (scan a QR code or type it)</td></tr>
+    <tr><td>How it works</td><td>Connects to the PC directly</td><td>The two sides find each other through Ayame Labo, a free matchmaking service; the video then flows directly (P2P)</td></tr>
+  </table>
+  <div class="tip">If unsure: use Home mode at home and Anywhere mode from outside.</div>
+</section>
+
+<section id="room">
+  <h2>About the room ID</h2>
+  <p>The room ID is a 32-character passphrase used in Anywhere mode. When the PC and the phone have the same room ID, they find each other and connect.</p>
+  <h3>Showing it</h3>
+  <p>On the PC, right-click the tray icon and choose "Open console" (double-clicking the icon also works).
+  The console shows the room ID, when it was created, and QR codes.</p>
+  <p>There are two QR codes side by side.</p>
+  <table>
+    <tr><th>QR code</th><th>What it contains</th></tr>
+    <tr><td>Room ID (for remote access)</td><td>The passphrase for Anywhere mode. Scan it on the phone</td></tr>
+    <tr><td>Connection URL (page to open)</td><td>The URL of the page to open on the phone. Use the drop-down above it to choose the page for use from anywhere (the published page), or a <b>Tailscale / LAN / localhost</b> URL for Home mode</td></tr>
+  </table>
+  <p class="note">Which route works depends on your network, so the drop-down does not choose automatically. Pick the one you normally use (for example, Tailscale).</p>
+  <h3>Regenerating it</h3>
+  <p>Press "Regenerate room ID" in the console or the tray menu to get a new ID. Use it when someone else may have learned the ID.
+  After regenerating, scan the QR code on the phone again.</p>
+  <div class="warn">Anyone who knows the room ID can see and control your PC. Treat it like a password.</div>
+</section>
+
+<section id="ui">
+  <h2>The screen (phone side)</h2>
+  <table>
+    <tr><th>Button / item</th><th>What it does</th></tr>
+    <tr><td>Tabs</td><td>Switch between Control, Connect, Restream, Comments and Settings</td></tr>
+    <tr><td>Start / Stop</td><td>Start and stop streaming</td></tr>
+    <tr><td>Audio OFF / Audio ON</td><td>Whether sound plays. The button shows the <b>current state</b> (OFF = muted, ON = playing); press it to switch. It always starts muted (OFF)</td></tr>
+    <tr><td>Fullscreen</td><td>Show the video full screen</td></tr>
+    <tr><td>codec</td><td>The compression method. Only those the PC supports are listed</td></tr>
+    <tr><td>bitrate</td><td>Image quality. Larger numbers look better and use more data. Lower it if the video stutters</td></tr>
+    <tr><td>mtu</td><td>The size of one network packet. Lower it if the video breaks up over a VPN</td></tr>
+    <tr><td>buffer</td><td>How long to delay playback to smooth it out (milliseconds). 0 means automatic</td></tr>
+    <tr><td>Input</td><td>Switch the area at the bottom between the trackpad and text input</td></tr>
+    <tr><td>Enter room ID</td><td>Set the passphrase for Anywhere mode (QR, photo, or typing)</td></tr>
+    <tr><td>stats</td><td>Connection status. lost = data that did not arrive, srvCPU = load on the PC</td></tr>
+  </table>
+  <p class="note">The screen is in Japanese or English depending on the phone's language. To choose, use "言語 / Language" at the top of the Settings tab.</p>
+</section>
+
+<section id="codec">
+  <h2>Tips for quality and settings</h2>
+  <h3>Choosing a codec (compression method)</h3>
+  <table>
+    <tr><th>Name</th><th>Characteristics</th></tr>
+    <tr><td>QSV / NVENC / AMF / MF</td><td>Hardware encoding. Light on the PC and fast, so try these first. Intel: QSV or MF; NVIDIA: NVENC; AMD: AMF</td></tr>
+    <tr><td>H.264</td><td>The most reliable. <b>Choose this if unsure.</b> Screen recording on the phone also works</td></tr>
+    <tr><td>H.265</td><td>Better quality than H.264 with less data. However, some phones cannot show it, and screen recordings come out black</td></tr>
+    <tr><td>VP9</td><td>Better quality than H.264, and screen recording works. A good choice if the phone supports it</td></tr>
+    <tr><td>x264 / x265</td><td>Software encoding. Puts load on the PC's CPU (for comparison and testing)</td></tr>
+    <tr><td>AV1</td><td>Experimental. Heavy, and often does not display</td></tr>
+  </table>
+  <h3>What to adjust when the video stutters</h3>
+  <p>Try these in order: (1) lower bitrate (for example 1000 → 600), (2) lower mtu (for example 1000 → 800), (3) raise buffer (for example 300).
+  Changes take effect when you press Start again.</p>
+
+  <h3>When the video gradually falls behind (lag)</h3>
+  <p>After a long session, the video can fall behind what is actually on the PC. Try the following, from the top.</p>
+  <table>
+    <tr><th>Method</th><th>Effect</th><th>Side effects</th></tr>
+    <tr><td>⚡ Cut lag button</td><td>Clears the accumulated delay on the spot</td><td>The video pauses for a moment. <b>Restream viewers stay connected</b></td></tr>
+    <tr><td>Set the mode to "Real-time (low latency)"</td><td>Delay builds up less</td><td>On an unstable connection, the video may stutter a little more</td></tr>
+    <tr><td>Reconnect button</td><td>The most reliable</td><td>The video drops for a few seconds, and restream viewers are disconnected once</td></tr>
+  </table>
+  <p class="note">Choose the mode in the Settings tab. "Smooth playback" favors smoothness; "Real-time (low latency)" favors low delay.
+  In real-time mode, the video catches up automatically when the delay grows.</p>
+  <h3>When sound and video are out of sync</h3>
+  <p>Press the 🔊 A/V sync button. It evens out how much video and audio are buffered on the receiving side, which removes the offset.
+  If the stats show something like <code>A/V: video +600ms</code>, the offset is that large.
+  In real-time mode, the offset is adjusted automatically when it grows.</p>
+
+  <p class="note">The stats at the bottom of the screen show where the delay comes from (<code>buf:</code> = delay buffered on the receiving side,
+  <code>rtt:</code> = network round-trip time, <code>undec:</code> = decoding delay).</p>
+</section>
+
+<section id="mouse">
+  <h2>Mouse and input</h2>
+  <p>Use the "Input" drop-down to switch between two methods.</p>
+  <table>
+    <tr><th>Method</th><th>Best for</th><th>How it works</th></tr>
+    <tr><td>🖱 Trackpad</td><td>Phones and tablets</td><td>The pointer moves as far as you slide (default)</td></tr>
+    <tr><td>⌨ Text input</td><td>Typing longer text</td><td>Type in the input box, then send</td></tr>
+  </table>
+  <p>When you control from a computer, there is nothing to switch. If "Use a physical mouse and keyboard directly on the video" is enabled in Settings,
+  moving the mouse over the video moves the PC's cursor to that spot.
+  Touch is handled as the trackpad and the mouse as direct control, so <b>you can use both at the same time</b>.</p>
+  <p class="note">In direct control, keys you type go straight to the PC without the input box, and Japanese input methods work as well.
+  However, <code>Ctrl+W</code>, <code>Alt+Tab</code> and the <code>Win</code> key on its own are taken by the browser first, so they cannot be sent.
+  Send them with "Send keys" or the dedicated buttons instead.</p>
+  <table>
+    <tr><th>Action</th><th>Result</th></tr>
+    <tr><td>Slide on the pad</td><td>Move the pointer (the green ring on the video moves)</td></tr>
+    <tr><td>Tap</td><td>Left-click</td></tr>
+    <tr><td>Long-press (about 0.65 s)</td><td>Right-click</td></tr>
+    <tr><td>Slide two fingers up or down</td><td>Scroll (the content follows your fingers)</td></tr>
+    <tr><td>Drag the handle to the right of the video up or down</td><td>Scroll (same direction as a scroll bar: moving it down moves the page down)</td></tr>
+    <tr><td>Volume − / Volume + / Mute</td><td>Control the PC's own volume</td></tr>
+    <tr><td>While in fullscreen</td><td>Slide directly on the video to control</td></tr>
+  </table>
+  <div class="tip">You can also control windows running as administrator, such as Task Manager, and the UAC prompt.</div>
+
+  <h3>How the pointer moves</h3>
+  <p>The PC's cursor moves along while you slide your finger. So menus that open when the pointer rests on them,
+  and the resize arrows (↔ ↕) at the edge of a window, work as usual.</p>
+  <p>If someone at the PC moves the mouse, the pointer on the screen jumps to that position.
+  While you are moving it from the phone, your input takes priority.</p>
+  <p>Scrolling applies to the window <b>under the pointer</b>. Place the pointer over the window you want to scroll.</p>
+
+  <h3>Special keys</h3>
+  <p>Keys that Windows treats specially cannot be sent with the normal key sending. There are dedicated buttons for them.</p>
+  <table>
+    <tr><th>Button</th><th>What it does</th></tr>
+    <tr><td>Ctrl+Alt+Del</td><td>Shows the security screen. Use it on the lock screen or sign-in screen</td></tr>
+    <tr><td>Lock</td><td>Locks the PC (same as Win+L)</td></tr>
+  </table>
+  <p class="note">Typing <code>ctrl+alt+del</code> or <code>win+l</code> in "Send keys" does the same as the buttons.
+  If sending fails, the reason is shown in the log.</p>
+</section>
+
+<section id="restream">
+  <h2>Restream</h2>
+  <p>This feature shows the screen you are receiving on the phone to other people, with comments.</p>
+  <h3>Starting a restream</h3>
+  <p>Open the Restream tab, check the number of rooms (how many people can watch; the default is 10), and press "📡 Start restream".
+  Send the URL or QR code that appears to the people you want to show it to. Your microphone is streamed too (switch with "🎙 Mic ON / 🔇 Mic muted").</p>
+  <h3>What you can do</h3>
+  <table>
+    <tr><td>Switch the video</td><td>Choose remote desktop, camera (rear), or still image. You can switch while streaming, and changes to the still image's crop frame apply immediately</td></tr>
+    <tr><td>PC audio</td><td>"PC audio ON/OFF" adds the PC's sound (such as a video's audio) to the stream. It is sent separately from the microphone, so viewers can balance the two volumes themselves</td></tr>
+    <tr><td>Mini preview</td><td>A small window in the Restream tab shows what is actually being streamed</td></tr>
+    <tr><td>Comments</td><td>Viewer comments appear in the Comments tab, newest first, and are shared with all viewers</td></tr>
+    <tr><td>Viewer count</td><td>"Viewers: n/n" shows how many are watching now</td></tr>
+    <tr><td>Join and leave notices</td><td>Viewers joining and leaving are shown in the Comments tab. A history per viewer (name, time, connection type) stays at the bottom of the Restream tab even after they leave</td></tr>
+  </table>
+  <h3>For viewers</h3>
+  <p>Opening the URL you received puts you in a free room automatically. Choose a name and a color, and you can post comments.
+  First-time viewers see a name screen, but their seat is already reserved while they type (the video starts after they enter a name).
+  When the stream is full, no one else can join.</p>
+  <p>After you press the audio button to turn it to "🔊 Audio ON", the two sliders below the player adjust
+  🎬 Video (the PC's sound) and 🎙 Streamer mic separately (the mic starts a bit louder).
+  The stream title is shown over the bottom of the video; tap the video to show or hide it.
+  "⛶ Fullscreen" switches to full screen, and "✕ Exit fullscreen" at the top right returns.</p>
+  <p class="note">The viewer page is in Japanese or English depending on the viewer's browser language.</p>
+  <div class="tip">More viewers means more load on the streaming phone and more data (about 500 kbps per viewer). Start with two or three people.
+  If streaming breaks up while the phone is in the background, video and audio are reacquired automatically when you return to the page.</div>
+</section>
+
+<section id="conv">
+  <h2>Handy features</h2>
+
+  <h3>Put it on the home screen (use it like an app)</h3>
+  <p>Choose "Add to Home Screen" in the phone's browser to open it full screen from an icon.
+  Without the address bar, you get more of the screen.</p>
+
+  <h3>Recent rooms (Anywhere mode)</h3>
+  <p>The "Enter room ID" screen lists up to 10 rooms you connected to recently, newest first.
+  Press "Use" to switch to that room.</p>
+  <p>You can name each entry. A room ID is 32 random characters,
+  so a name such as "Home PC" or "Work laptop" makes it easy to tell several PCs apart.
+  Remove entries you no longer need with "×". Because room IDs are too long to retype, you are asked to confirm first.</p>
+  <div class="note">The list shows room IDs with the middle omitted (<code>aaaa1111…4444</code>).
+  A room ID is <b>effectively a password</b>, so the full value is not listed on screen.</div>
+
+  <h3>Saved settings</h3>
+  <p>Quality (bitrate), mode, Direct P2P, input method, pointer style, restream settings and so on are kept the next time you open the page.
+  Settings are saved per device, so a phone and a computer can have different settings.</p>
+  <div class="note">The codec and the screen (monitor) are restored <b>only if the previous choice is still available</b>.
+  This prevents Start from failing with a setting that no longer exists, for example after connecting to a different PC or unplugging a monitor.</div>
+
+  <h3>Automatic reconnection</h3>
+  <p>Between pressing Start and pressing Stop, a dropped connection is reconnected automatically.
+  This covers cases such as a weak signal or switching to another app on the phone and back.
+  Reconnection attempts are logged with timestamps in the Connect tab.</p>
+  <div class="tip">To stop reconnecting, press Stop. Stop works even while a reconnection is in progress.</div>
+
+  <h3>Staying connected while you use other apps</h3>
+  <p>If you go to the home screen or open another app, the connection is kept for a while.
+  However, this <b>only works while the audio is "🔊 Audio ON"</b>.
+  With no sound playing, the phone's OS sees no reason to keep the browser running.</p>
+
+  <h3>Zooming in</h3>
+  <p>Spread two fingers on the video to zoom from 1× to 4×. The spot you touch first becomes the center.
+  While zoomed, moving the pointer away from the middle of the screen makes the view follow the pointer.
+  While you work with fine movements near the middle, the view stays still. "Reset to 1×" at the top left returns to normal size.</p>
+  <div class="note">The pointer arrow keeps its size when zoomed, so it is easy to aim.</div>
+
+  <h3>Fullscreen and text input</h3>
+  <p>In fullscreen, press "⌨" to show a text box below the video. The video shrinks slightly to make room.
+  While the keyboard is shown, the tabs are hidden; they come back when you close the keyboard.</p>
+  <p>In the normal screen, when you switch to text input, only the video and the text box stay while the keyboard is shown,
+  and the buttons between them (audio, fullscreen, volume and so on) are hidden for the moment.
+  The keyboard takes up about half the screen, so with the buttons left in place the video and the text box could not both be seen.
+  The buttons come back when you close the keyboard.</p>
+</section>
+
+<section id="trouble">
+  <h2>Troubleshooting</h2>
+  <h3>No video</h3>
+  <ul>
+    <li>Switch the codec to an H.264 type and press Start again (the most reliable)</li>
+    <li>In Anywhere mode, check that the room ID on the phone is the same as the PC's</li>
+    <li>If the phone's log shows <code>pc failed</code>, your combination of networks may not allow a direct connection. Changing location (network) may help</li>
+  </ul>
+  <h3>No sound</h3>
+  <p>Press the audio button so it shows "🔊 Audio ON". Browsers require the page to start muted (OFF).
+  If you are watching a restream and hear only one of the two sources, check that the "🎬 Video" and "🎙 Streamer mic" sliders below the player
+  are not turned down.</p>
+  <h3>Choppy video</h3>
+  <p>Try the order in "Tips for quality and settings". If <code>lost</code> in the stats keeps rising, the quality is too high for the connection.</p>
+  <h3>Start cannot be pressed, or it stays at "Authenticating…"</h3>
+  <p>A device connecting for the first time cannot do anything until someone presses "Yes" in the approval dialog on the PC.
+  Once approved, the device is registered and authenticated automatically from then on. <b>Approval is required in Home mode (LAN) too.</b></p>
+  <p>When the approval dialog cannot be shown, for example on the sign-in screen, approve with a one-time PIN in the console on the PC instead.
+  The console's "Devices awaiting approval (PIN)" lists the connecting device's name next to its PIN.
+  If you recognize the device, enter that PIN and press "Allow this PIN".</p>
+  <div class="warn">Approval is required so that not just anyone who can join the same network can control the PC.</div>
+
+  <h3>Some windows cannot be controlled</h3>
+  <p>Normally, windows running as administrator and the UAC prompt can both be controlled. If they cannot, check that the service is running
+  (right-click the tray icon and see whether it says "Status: running").</p>
+
+  <h3>Ctrl+Alt+Del or Lock does not work</h3>
+  <p>Reinstalling the service applies the required settings automatically. Run the install batch file again.
+  If it still does not work, check the reason shown in the client's log after pressing the button.</p>
+
+  <h3>The PC starts but does not begin listening</h3>
+  <p>Check that "Auto-start" is on in the console or the tray menu.</p>
+  <p>If the console warns that an old startup entry remains, press "Remove".
+  With the old entry left in place, a second DesktopStream starts separately from the service, and the two get in each other's way.</p>
+
+  <h3>Someone may have learned the room ID</h3>
+  <p>Use "Regenerate room ID" in the console or the tray menu to get a new ID, then scan it again on the phone.
+  Also remove any devices you do not recognize from "Registered devices" in the console.
+  A removed device is <b>disconnected immediately, even if it is connected</b>.</p>
+
+  <h3>The video stops after a while with nothing happening</h3>
+  <p>If the screen does not change at all for a while, screen capture on the PC may stop.
+  This does not happen while a video or audio is playing.
+  There is a mechanism that recovers automatically within a few seconds, but moving the mouse or pressing ⚡ Cut lag also brings it back.</p>
+
+  <h3>The phone cannot connect</h3>
+  <p>Check the following in order.</p>
+  <ul>
+    <li>In the console on the PC, "Firewall" shows "Registered"
+      (if not, a warning appears and you can add the rule with a button)</li>
+    <li>The browser is not showing a certificate warning. The first time, you need to allow it (in Chrome: "Advanced" → "Proceed")</li>
+    <li>In the console's Connection URL QR code, you chose the route you actually use (Tailscale, LAN, and so on) before scanning</li>
+  </ul>
+
+  <h3>Switches for troubleshooting (advanced)</h3>
+  <p>Creating an empty file with a specific name in the following folder changes the behavior.
+  Creating it requires administrator rights, and the service must be restarted afterwards.</p>
+  <p><code>C:\ProgramData\DesktopStream\</code></p>
+  <table>
+    <tr><th>File name</th><th>Effect</th></tr>
+    <tr><td><code>capture_wgc</code></td><td>Changes the screen capture method. For working around the video stopping when nothing changes on screen
+      (you can also switch with the bundled <code>set-capture-api.bat</code>)</td></tr>
+    <tr><td><code>no_stall_watch</code></td><td>Turns off automatic recovery when the video stops</td></tr>
+    <tr><td><code>no_tls</code></td><td>Listens without encryption (http). For finding the cause when you cannot get past the certificate warning.
+      Note that the microphone and camera stop working when the page is opened by IP address</td></tr>
+    <tr><td><code>worker_as_user</code></td><td>Runs with the older, lower privileges. The UAC prompt and the lock screen will no longer be shown</td></tr>
+    <tr><td><code>lang_en</code> / <code>lang_ja</code></td><td>Fixes the language of the PC side (tray, approval dialog, console). You can also choose it in the console's "言語 / Language"</td></tr>
+  </table>
+  <p class="note">If you create the file with Notepad, it gets an extension such as <code>no_tls.txt</code>; it is still recognized.</p>
+
+  <h3>Where the logs are</h3>
+  <p>The logs are in the following folder and can be opened with Notepad. The logs are written in Japanese.</p>
+  <p><code>C:\ProgramData\DesktopStream\logs\</code>
+  (<code>service.log</code> = the service, <code>worker.log</code> = the streaming process)</p>
+</section>
+
+<p style="text-align:center;"><a href="quickstart.en.html">← Back to Quick Start</a></p>
+</main>
+<footer>Desktop Stream — User Guide</footer>
+</body>
+</html>
