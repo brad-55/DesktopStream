@@ -8,47 +8,64 @@
 <style>
   /* 配信の視聴専用クライアント。
      URLの ?room=<ベース32文字><部屋数+1の3桁> から部屋数を割り出し、
-     001から順に空き部屋を探して入室する。 */
+     001から順に空き部屋を探して入室する。
+
+     【画面の作り】ツイキャスの視聴画面を目標にした「全画面 + オーバーレイ」。
+     映像を画面いっぱいに敷き、その上にヘッダ・コメント・操作を重ねる。
+     以前は「ヘッダ / 映像(16:9) / コメント欄」を縦に積んでいたため、
+     映像が小さく、コメント欄が別の箱に見えていた。
+     【映像は contain のまま】cover にすると横長のPC画面の左右が切れ、
+     何が映っているか分からなくなる。見た目より「全部見える」を優先する。 */
+  :root {
+    --fg: #f2f5f8;
+    --fg2: rgba(233,238,243,.72);
+    --line: rgba(255,255,255,.13);
+    --panel: rgba(14,18,23,.86);
+    --accent: #2ecf8e;
+    --warn: #ffc46b;
+    --pill: 999px;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
   body {
-    background: #0d1116; color: #e6e8ea;
+    position: fixed; inset: 0; overflow: hidden;
+    background: #000; color: var(--fg);
     /* この画面に出るのは視聴者が書いたコメントと名前、つまり普通の文章である。
        操作クライアント2種の等幅指定はログ・IPアドレス・鍵指紋を読むためのもので、
-       ここには当てはまらない。あえて揃えず、読みやすいシステムフォントを使う。
-       (旧指定のCJKフォールバック "Noto Sans Mono CJK JP" は iOS にも標準の Windows にも
-        入っておらず、肝心の日本語コメントには実質適用されていなかった) */
+       ここには当てはまらない。あえて揃えず、読みやすいシステムフォントを使う。 */
     font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif;
-    height: 100vh; height: 100dvh;
-    display: flex; flex-direction: column; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
   }
-  header {
-    display: flex; align-items: center; gap: 10px; flex: none;
-    padding: 8px 14px;
-    padding-left: calc(14px + env(safe-area-inset-left));
-    padding-right: calc(14px + env(safe-area-inset-right));
-    padding-top: calc(8px + env(safe-area-inset-top));
-    border-bottom: 1px solid #1e242b; background: #11151a;
-  }
-  header h1 { font-size: 13px; font-weight: 700; letter-spacing: .08em; color: #cfd6dd; }
-  /* 版の表示。狭い画面では真っ先に消してよい情報なので、詰まったら隠す。 */
-  #verClient { font-size: 11px; color: #6b7684; flex: none; }
-  @media (max-width: 420px) { #verClient { display: none; } }
-  #dot { width: 10px; height: 10px; border-radius: 50%; background: #555; flex: none; }
-  #dot.ok { background: #2ecf8e; } #dot.warn { background: #e8b93c; } #dot.err { background: #e05252; }
-  #status { font-size: 12px; color: #9aa4b0; margin-left: auto; text-align: right; }
 
-  #app {
-    flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px;
-    padding: 10px;
-    padding-left: calc(10px + env(safe-area-inset-left));
-    padding-right: calc(10px + env(safe-area-inset-right));
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  /* ---------- 上端の帯(映像の上に薄く重ねる) ---------- */
+  header {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 20;
+    display: flex; align-items: center; gap: 8px;
+    padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 20px calc(14px + env(safe-area-inset-left));
+    background: linear-gradient(to bottom, rgba(0,0,0,.62), rgba(0,0,0,.24) 60%, rgba(0,0,0,0));
+    pointer-events: none;
   }
-  .stage {
-    position: relative; flex: none; width: 100%; aspect-ratio: 16/9;
-    background: #000; border-radius: 8px; overflow: hidden;
+  header h1 {
+    font-size: 12px; font-weight: 700; letter-spacing: .06em; color: #e8edf2;
+    text-shadow: 0 1px 3px rgba(0,0,0,.75);
   }
+  /* 版の表示。狭い画面では真っ先に消してよい情報なので、詰まったら隠す。 */
+  #verClient { font-size: 11px; color: rgba(233,238,243,.55); flex: none; text-shadow: 0 1px 3px rgba(0,0,0,.75); }
+  @media (max-width: 420px) { #verClient { display: none; } }
+  #dot {
+    width: 9px; height: 9px; border-radius: 50%; background: #555; flex: none;
+    box-shadow: 0 0 0 3px rgba(0,0,0,.25);
+  }
+  #dot.ok { background: var(--accent); } #dot.warn { background: #e8b93c; } #dot.err { background: #e05252; }
+  #status {
+    margin-left: auto; font-size: 11px; color: var(--fg2); text-align: right;
+    text-shadow: 0 1px 3px rgba(0,0,0,.75);
+    max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* ---------- 映像(画面いっぱい) ---------- */
+  #app { position: absolute; inset: 0; }
+  .stage { position: absolute; inset: 0; background: #000; overflow: hidden; }
   video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
   /* 状態を示す小さな札(トグル表示)。操作クライアント2種と同じ作り。
      色だけに頼らず ON / OFF の文字を必ず入れる。 */
@@ -59,20 +76,12 @@
     background: #48484a; color: #f5f5f7;
   }
   .sw.on { background: #30d158; color: #06240f; }
-  #unmute {
-    flex: none;
-    padding: 6px 10px; min-height: 34px; font: inherit; font-size: 12px; color: #e6e8ea;
-    background: #161b21; border: 1px solid #2a323b; border-radius: 6px;
-    cursor: pointer; touch-action: manipulation; display: none;
+
+  #ovMsg {
+    position: absolute; left: 0; right: 0; top: 42%; text-align: center;
+    color: rgba(233,238,243,.72); font-size: 13px; padding: 0 24px; pointer-events: none;
+    text-shadow: 0 1px 4px rgba(0,0,0,.8);
   }
-  #unmute.on { display: inline-block; }
-  #retry {
-    position: absolute; left: 50%; top: 62%; transform: translate(-50%,-50%);
-    padding: 10px 16px; font: inherit; font-size: 13px; color: #e6e8ea;
-    background: rgba(28,58,46,.9); border: 1px solid #2f5a46; border-radius: 8px;
-    cursor: pointer; touch-action: manipulation; display: none;
-  }
-  #retry.on { display: block; }
   #soundOnly {
     position: absolute; inset: 0; display: none;
     font-size: 20px; font-weight: 700; letter-spacing: .1em; color: #cfd6dd;
@@ -81,80 +90,20 @@
   }
   /* JSで display を "" にすると下記のflexが効く */
   #soundOnly:not([style*="none"]) { display: flex; }
-  #ovMsg {
-    position: absolute; left: 0; right: 0; top: 38%; text-align: center;
-    color: #8a93a0; font-size: 13px; padding: 0 16px; pointer-events: none;
+  #retry {
+    position: absolute; left: 50%; top: 58%; transform: translate(-50%,-50%);
+    padding: 10px 18px; font: inherit; font-size: 13px; color: var(--fg);
+    background: rgba(28,58,46,.92); border: 1px solid #2f5a46; border-radius: var(--pill);
+    cursor: pointer; touch-action: manipulation; display: none; z-index: 8;
   }
-
-  /* コメント欄 */
-  #cmWrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-  #comments {
-    flex: 1; min-height: 0; overflow: auto; padding: 8px 10px;
-    background: #0a0d10; border: 1px solid #1e242b; border-radius: 8px;
-    display: flex; flex-direction: column; gap: 6px;
-  }
-  .cm { font-size: 13px; line-height: 1.5; word-break: break-word; }
-  .cm .meta { color: #7f8b98; margin-right: 6px; font-size: 11px; }
-  #cmForm { display: flex; gap: 6px; flex: none; }
-  /* P2Pが通らない回線の警告。既定は非表示で、検出したときだけ出す。 */
-  #netWarn {
-    flex: none; padding: 8px 10px; margin-bottom: 6px; border-radius: 8px;
-    font-size: 13px; color: #ffd6a5;
-    background: rgba(120,70,0,.35); border: 1px solid rgba(255,170,60,.45);
-  }
-  #cmColor {
-    width: 44px; height: 44px; flex: none; padding: 2px;
-    background: #0d1116; border: 1px solid #2a323b; border-radius: 8px; cursor: pointer;
-  }
-  #cmName {
-    width: 90px; flex: none; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
-    padding: 8px; border-radius: 8px; font: inherit; font-size: 16px;
-  }
-  #cmText {
-    flex: 1; min-width: 0; background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
-    padding: 8px; border-radius: 8px; font: inherit; font-size: 16px;
-  }
-  #cmSend {
-    flex: none; padding: 8px 14px; min-height: 44px; font: inherit; font-size: 13px;
-    background: #1c3a2e; color: #dff3e8; border: 1px solid #2f5a46; border-radius: 8px;
-    cursor: pointer; touch-action: manipulation;
-  }
-  #cmSend:disabled, #cmText:disabled { opacity: .45; }
-
-  /* 縦画面: プレーヤー高さを画面の42%までに抑える。
-     キーボード表示時は interactive-widget=resizes-content により dvh が縮むため、
-     プレーヤーが自動で小さくなり、入力欄とともに画面内に収まる */
-  @media (orientation: portrait), (max-width: 599px) {
-    .stage { max-height: 42dvh; }
-    #comments { min-height: 60px; }
-  }
-  /* 横画面: プレーヤー左、コメント右 */
-  @media (orientation: landscape) and (min-width: 600px) {
-    #app { flex-direction: row; }
-    .stage { flex: 0 1 auto; width: auto; height: 100%; max-height: 100%; max-width: 62%; }
-    #cmWrap { flex: 1 1 300px; min-width: 260px; }
-  }
-  /* プレーヤー下の操作行 */
-  /* プレーヤー下の操作行: 2行2列(左列=スライダー / 右列=ボタン) */
-  #vrow {
-    display: grid; grid-template-columns: 1fr auto;
-    align-items: center; gap: 8px 10px; padding: 2px 0 8px;
-  }
-  #vrow #fsBtn, #vrow #unmute {
-    flex: none; min-height: 36px; padding: 6px 12px; font: inherit; font-size: 13px;
-    background: #161b21; color: #e6e8ea; border: 1px solid #2a323b; border-radius: 6px;
-    cursor: pointer; touch-action: manipulation; white-space: nowrap;
-  }
-  /* 音量バランス: 動画音声(PC音声)と配信者マイクの2本 */
-  .volgrp { display: flex; align-items: center; gap: 5px; min-width: 0; }
-  .volgrp .vlabel { font-size: 11px; color: #9aa4b0; flex: none; }
-  .volgrp input[type="range"] { flex: 1; min-width: 0; accent-color: #2ecf8e; }
-  /* 配信タイトル: プレーヤー下部に重ねて表示。プレーヤーをタップで表示/非表示 */
+  #retry.on { display: block; }
+  /* 配信タイトル: 上端の帯のすぐ下に重ねる(下端はコメントと入力欄が使うため) */
   #bTitle {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
-    padding: 18px 12px 8px;
-    background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,0));
+    position: absolute; left: 0; right: 0; z-index: 6;
+    top: calc(44px + env(safe-area-inset-top));
+    padding: 0 calc(16px + env(safe-area-inset-right)) 0 calc(16px + env(safe-area-inset-left));
     font-size: 13px; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,.9);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     pointer-events: none;
   }
@@ -162,57 +111,160 @@
   .stage.hide-title #bTitle { display: none; }
   /* 全画面から戻るボタン: 全画面中のみ表示 */
   #fsExit {
-    position: absolute; top: 8px; right: 8px; z-index: 5; display: none;
-    min-height: 36px; padding: 6px 12px; font: inherit; font-size: 13px; color: #e6e8ea;
-    background: rgba(13,17,22,.72); border: 1px solid rgba(58,68,80,.85); border-radius: 6px;
+    position: absolute; top: calc(10px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right));
+    z-index: 25; display: none;
+    min-height: 36px; padding: 6px 12px; font: inherit; font-size: 12px; color: var(--fg);
+    background: rgba(13,17,22,.8); border: 1px solid var(--line); border-radius: var(--pill);
     cursor: pointer; touch-action: manipulation;
   }
   .stage:fullscreen #fsExit { display: block; }
   .stage:-webkit-full-screen #fsExit { display: block; }
+
+  /* ---------- 下端のオーバーレイ(コメント / 操作 / 入力) ---------- */
+  #cmWrap {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; flex-direction: column; justify-content: flex-end; gap: 8px;
+    padding: 0 calc(10px + env(safe-area-inset-right))
+             calc(8px + var(--kb, 0px) + env(safe-area-inset-bottom))
+             calc(10px + env(safe-area-inset-left));
+    pointer-events: none;
+    /* スクリムは帯全体に1枚だけ敷く。コメントの箱に背景を付けると、
+       箱の輪郭が見えて「別のパネル」に見えてしまう(スクリムは映像に溶けさせる)。 */
+    background: linear-gradient(to top,
+      rgba(0,0,0,.92) 0%, rgba(0,0,0,.80) 12%, rgba(0,0,0,.55) 30%,
+      rgba(0,0,0,.26) 48%, rgba(0,0,0,.08) 64%, rgba(0,0,0,0) 78%);
+  }
+  #cmWrap > * { pointer-events: auto; }
+
+  /* コメントは下端から立ち上がるスクリムの上に流す(箱に見せない) */
+  #comments {
+    flex: 0 1 auto; min-height: 0; max-height: 44dvh; overflow: auto;
+    padding: 6px 4px 2px; border: none; border-radius: 0; background: none;
+    display: flex; flex-direction: column; gap: 5px;
+    scrollbar-width: none;
+  }
+  #comments::-webkit-scrollbar { display: none; }
+  .cm {
+    font-size: 13.5px; line-height: 1.5; word-break: break-word; color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,.9);
+  }
+  .cm .meta { color: #dbe4ec; margin-right: 6px; font-size: 11px; }
+  .cm-host { color: #ffd479 !important; font-weight: 700; }
   /* コメントのアバター(画像 or 頭文字の丸) */
   .cm-av {
     width: 20px; height: 20px; border-radius: 50%; flex: none;
     display: inline-flex; align-items: center; justify-content: center;
     font-size: 11px; font-weight: 700; color: #0d1116; overflow: hidden;
-    vertical-align: middle; border: none; padding: 0; cursor: default;
+    vertical-align: -5px; border: none; padding: 0; cursor: default;
   }
   .cm-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  #myAv { width: 44px; height: 44px; cursor: pointer; font-size: 18px; background: #8a93a0; }
   .cm .cm-av { margin-right: 6px; }
-  .cm-host { color: #ffd479 !important; font-weight: 700; }
-  .ng-icon-row { display: flex; align-items: center; gap: 10px; }
-  .ng-icon-row button#ngIconBtn {
-    flex: 1; min-height: 40px; padding: 8px; font: inherit; font-size: 13px;
-    background: #161b21; color: #cfd6dd; border: 1px solid #2a323b; border-radius: 8px;
+
+  /* 音量と全画面: 入力欄の上に細い帯として置く */
+  #vrow {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+    padding: 7px 12px; border-radius: var(--pill);
+    background: var(--panel); border: 1px solid var(--line);
+  }
+  #vrow .volgrp { display: flex; align-items: center; gap: 6px; flex: 1 1 120px; min-width: 0; }
+  #vrow .vlabel { font-size: 11px; color: var(--fg2); flex: none; }
+  #vrow input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+  #vrow #unmute {
+    flex: none; padding: 6px 12px; min-height: 34px; font: inherit; font-size: 12px; color: var(--fg);
+    background: rgba(255,255,255,.08); border: 1px solid var(--line); border-radius: var(--pill);
+    cursor: pointer; touch-action: manipulation; display: none;
+  }
+  #unmute.on { display: inline-block; }
+  #vrow #fsBtn {
+    flex: none; min-height: 34px; padding: 6px 12px; font: inherit; font-size: 12px;
+    background: rgba(255,255,255,.08); color: var(--fg); border: 1px solid var(--line);
+    border-radius: var(--pill); cursor: pointer; touch-action: manipulation; white-space: nowrap;
+  }
+
+  /* コメント入力(画面下端に浮かぶカプセル) */
+  #cmForm {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px; border-radius: var(--pill);
+    background: var(--panel); border: 1px solid var(--line);
+  }
+  #myAv { width: 36px; height: 36px; cursor: pointer; font-size: 15px; background: #8a93a0; }
+  #cmColor {
+    width: 32px; height: 32px; flex: none; padding: 2px;
+    background: transparent; border: 1px solid var(--line); border-radius: 50%; cursor: pointer;
+  }
+  #cmName {
+    width: 68px; flex: none; color: var(--fg); font: inherit; font-size: 16px;
+    background: rgba(255,255,255,.08); border: none; border-radius: var(--pill); padding: 8px 10px;
+    min-width: 0;
+  }
+  #cmText {
+    flex: 1; min-width: 0; color: var(--fg); font: inherit; font-size: 16px;
+    background: rgba(255,255,255,.10); border: none; border-radius: var(--pill); padding: 8px 12px;
+  }
+  #cmName::placeholder, #cmText::placeholder { color: rgba(233,238,243,.45); }
+  #cmSend {
+    flex: none; min-height: 36px; padding: 0 16px; font: inherit; font-size: 13px; font-weight: 700;
+    background: var(--accent); color: #06240f; border: none; border-radius: var(--pill);
     cursor: pointer; touch-action: manipulation;
   }
-  #ngIconPrev { width: 40px; height: 40px; font-size: 16px; background: #8a93a0; }
-  /* ユーザー名ゲート */
+  #cmSend:disabled, #cmText:disabled { opacity: .45; }
+  /* P2Pが通らない回線の警告。既定は非表示で、検出したときだけ出す。 */
+  #netWarn {
+    flex: none; padding: 8px 12px; border-radius: 12px;
+    font-size: 12.5px; color: #ffe2b8;
+    background: rgba(80,48,4,.9); border: 1px solid rgba(255,170,60,.45);
+  }
+
+  /* 横画面・広い画面: コメントと入力欄は右側に寄せる(映像の邪魔をしない) */
+  @media (orientation: landscape) and (min-width: 600px) {
+    /* 横画面はコメントが右に寄るので、スクリムも右側だけに掛ける
+       (全幅に掛けると映像の左下までも暗くなり、何を見ているか分かりにくい) */
+    #cmWrap {
+      align-items: flex-end; padding-right: calc(14px + env(safe-area-inset-right));
+      background: linear-gradient(to left,
+        rgba(0,0,0,.90) 0%, rgba(0,0,0,.62) 22%, rgba(0,0,0,.28) 36%, rgba(0,0,0,0) 52%);
+    }
+    #comments, #vrow, #cmForm { width: min(46vw, 440px); }
+    #comments { max-height: 62dvh; }
+  }
+
+  /* ---------- ユーザー名ゲート ---------- */
   #nameGate {
-    position: fixed; inset: 0; z-index: 100; background: rgba(9,12,15,.92);
+    position: fixed; inset: 0; z-index: 100; background: rgba(6,9,12,.94);
     display: flex; align-items: center; justify-content: center; padding: 20px;
   }
   .ng-box {
     width: 100%; max-width: 340px; background: #11151a; border: 1px solid #2a323b;
-    border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px;
+    border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px;
   }
   .ng-title { font-size: 15px; font-weight: 700; color: #cfd6dd; text-align: center; }
   #ngName {
     background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
-    padding: 10px; border-radius: 8px; font: inherit; font-size: 16px;
+    padding: 10px; border-radius: 10px; font: inherit; font-size: 16px;
+  }
+  #ngPass {
+    background: #0d1116; border: 1px solid #2a323b; color: #e6e8ea;
+    padding: 10px; border-radius: 10px; font: inherit; font-size: 16px;
   }
   #ngGo {
     padding: 12px; min-height: 44px; font: inherit; font-size: 14px; font-weight: 700;
-    background: #1c3a2e; color: #dff3e8; border: 1px solid #2f5a46; border-radius: 8px;
+    background: #1c3a2e; color: #dff3e8; border: 1px solid #2f5a46; border-radius: var(--pill);
     cursor: pointer; touch-action: manipulation;
   }
+  .ng-icon-row { display: flex; align-items: center; gap: 10px; }
+  .ng-icon-row button#ngIconBtn {
+    flex: 1; min-height: 40px; padding: 8px; font: inherit; font-size: 13px;
+    background: #161b21; color: #cfd6dd; border: 1px solid #2a323b; border-radius: 10px;
+    cursor: pointer; touch-action: manipulation;
+  }
+  #ngIconPrev { width: 40px; height: 40px; font-size: 16px; background: #8a93a0; }
+
   /* 押した瞬間の反応。
      このファイルは * に -webkit-tap-highlight-color: transparent を掛けて
      OS標準のタップ反応を消しているため、これが無いとスマホで
      「押せたのかどうか」が全く分からない要素ができる(実際に
      全画面・再検索・アイコン選択などが無反応だった)。
-     背景色はボタンごとに違うので、色を決め打ちせず明度で反応させる。
-     個別の :active を足していく方式は取りこぼすため、1ルールで全ボタンを覆う。 */
+     背景色はボタンごとに違うので、色を決め打ちせず明度で反応させる。 */
   button:active:not(:disabled) { filter: brightness(1.35); }
   /* キーボードのフォーカス位置を必ず見えるようにする(:focus ではなく :focus-visible)。 */
   :focus-visible { outline: 2px solid #36d399; outline-offset: 2px; }
@@ -412,7 +464,7 @@ if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(doc
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.4";
+const CLIENT_VERSION = "v0.7.16";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -433,6 +485,20 @@ let joinedRoom = "";
 let ended = false;
 
 function pad3(n){ return String(n).padStart(3, "0"); }
+// OSキーボードが出ている間、下端の入力欄が隠れないよう持ち上げる。
+// interactive-widget=resizes-content を解釈しない環境(iOS Safari)では
+// レイアウトが縮まず、キーボードが上に覆いかぶさる。実測して足すしかない。
+(function(){
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const sync = () => {
+    const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    document.documentElement.style.setProperty("--kb", kb + "px");
+  };
+  vv.addEventListener("resize", sync);
+  vv.addEventListener("scroll", sync);
+  sync();
+})();
 function setStatus(text, cls){
   $("status").textContent = T(text);
   $("dot").className = cls || "";
@@ -864,10 +930,15 @@ function addComment(name, text, ts, color, icon, host){
   // 過去のコメントを読もうとスクロールを下げている最中に誰かが発言すると、
   // そのたび先頭へ引き戻されて読めなくなる。視聴者が多いほど頻発する。
   // 判定は挿入の前に行う(挿入後はスクロール位置が動きうるため)。
-  const atTop = box.scrollTop < 40;
-  box.insertBefore(div, box.firstChild); // 最新コメントを上に表示
-  while (box.childElementCount > 200) box.removeChild(box.lastChild);
-  if (atTop) box.scrollTop = 0;
+  // 【並び順】新しいコメントを**下**に足す。映像の下端に重ねた帯では、上に足すと
+  // 「新しい発言が上に出て、古いものが下へ流れ落ちる」動きになり、視聴画面として読みにくい。
+  // 追従の判定は挿入の**前**に行う(挿入後はスクロール位置が動きうるため)。
+  // 下端付近を見ているときだけ最新へ追従し、過去を読んでいる最中に引き戻さない
+  // (上に足していた頃に「読んでいる最中に先頭へ引き戻される」不具合があり、その対策は残す)。
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.appendChild(div);
+  while (box.childElementCount > 200) box.removeChild(box.firstChild);
+  if (atBottom) box.scrollTop = box.scrollHeight;
 }
 function sendComment(){
   const text = $("cmText").value.trim();
