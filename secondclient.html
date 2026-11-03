@@ -478,7 +478,7 @@ if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(doc
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.20";
+const CLIENT_VERSION = "v0.7.21";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -658,8 +658,6 @@ const NAT_STUN = [
 ];
 let natSeen = new Map();  // 内側ポート -> 外から見えた外側ポートの集合
 let natPublicIp = "";     // 自分のグローバルIP(srflx候補から取れる。取得に外部APIは不要)
-let natWarned = false;
-
 // ICE候補を1つ受け取るたびに呼ぶ。
 function natNote(c){
   try {
@@ -681,18 +679,50 @@ function natIsSymmetric(){
   return false;
 }
 // 候補収集が終わった時点で判定する。
+// **すぐには出さない。** この判定は「直接つながらない形式かもしれない」であって、
+// 実際には通ることがある。10秒たっても繋がらないときだけ出す。
+// 接続が failed で確定していれば待たない。
+let natPending = "";    // 検出した理由(まだ出していない)
+let natTimer = null;
+let natWarned = false;  // 一度出したら、そのセッションでは出し直さない
+let natGen = 0;         // 世代。await 明け・破棄で無効化する
+const NAT_WARN_DELAY_MS = 10000;
+
+function natConnOk(){ return !!(pc && pc.connectionState === "connected"); }
+function natFailed(){ return !!(pc && pc.connectionState === "failed"); }
+function natClearTimer(){ if (natTimer){ clearTimeout(natTimer); natTimer = null; } }
+function natHideWarn(){ const el = $("netWarn"); if (el) el.style.display = "none"; }
+
+function natFire(){
+  if (natWarned || !natPending) return;   // 理由が無ければ出さない
+  if (natConnOk()) return;                // 発火の直前に繋がった
+  natWarned = true;
+  natShowWarn(natPending);
+}
+
 async function natVerdict(){
-  if (natWarned) return;
+  if (natWarned || natPending) return;
+  const gen = ++natGen;
   let why = "";
   if (natIsSymmetric()) why = "この回線は直接つながらない形式(対称型NAT)です";
   else if (natPublicIp){
     const carrier = await natLookupCarrier(natPublicIp);
+    if (gen !== natGen) return;
     if (carrier) why = carrier + " の回線です。直接つながらないことがあります";
   }
   if (!why) return;
-  natWarned = true;
-  natShowWarn(why);
+  if (gen !== natGen || natConnOk()) return;
+  natPending = why;
+  if (natFailed()){ natClearTimer(); natFire(); return; }
+  natTimer = setTimeout(() => { natTimer = null; natFire(); }, NAT_WARN_DELAY_MS);
 }
+
+function natOnConnected(){ natGen++; natClearTimer(); natPending = ""; natHideWarn(); }
+function natOnFailed(){ natClearTimer(); natFire(); }
+// 破棄・作り直し: 判定も表示も**捨てる**。接続の試行ごとに判定し直すので、
+// 「一度出した」状態を持ち越さない(持ち越すと次の試行で黙る)。
+// 前の試行の警告を消さないと、次がNAT非該当でも古い文言が出たままになる。
+function natOnTeardown(){ natGen++; natClearTimer(); natPending = ""; natWarned = false; natHideWarn(); }
 // 回線事業者を調べる(RDAP)。
 //
 // 【エンドポイントを直接指定している理由】親の rdap.apnic.net はリダイレクトを挟み、
@@ -753,7 +783,9 @@ async function startPeer(){
       setStatus("視聴中", "ok");
       retryCount = 0; // 接続できたらリトライ回数を戻す
       acquireViewLock();
+      natOnConnected();
     }
+    if (pc.connectionState === "failed") natOnFailed();
     if (pc.connectionState === "failed" || pc.connectionState === "closed") onEnded("接続が切れました");
   };
   pc.addTransceiver("video", { direction: "recvonly" });
@@ -844,6 +876,7 @@ function onEnded(msg, noRetry){
   ended = true;
   enableComment(false);
   releaseViewLock();
+  natOnTeardown();
   try { pc && pc.close(); } catch(e){}
   try { ws && ws.close(); } catch(e){}
   pc = null; ws = null; dc = null;

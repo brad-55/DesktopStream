@@ -1843,8 +1843,8 @@ async function setupPeer() {
   pc.oniceconnectionstatechange = () => { log("ICE:", pc.iceConnectionState); };
   pc.onconnectionstatechange = () => {
     log("pc", pc.connectionState);
-    if (pc.connectionState === "connected") { setState("connected", "on"); logSelectedRoute(); phase("P2P確立"); }
-    if (pc.connectionState === "failed") setState("failed", "err");
+    if (pc.connectionState === "connected") { setState("connected", "on"); logSelectedRoute(); phase("P2P確立"); natOnConnected(); }
+    if (pc.connectionState === "failed") { setState("failed", "err"); natOnFailed(); }
   };
   pc.ontrack = (e) => {
     if (video.srcObject !== e.streams[0]) {
@@ -2627,6 +2627,7 @@ function reconnect() {
   phaseStart("接続を開始(張り直し)");
   // 既存の接続を破棄して作り直す。
   try { if (control) control.close(); } catch(e){}
+  natOnTeardown();
   try { if (pc) pc.close(); } catch(e){}
   try { if (ws) ws.close(); } catch(e){}
   control = null; pc = null;
@@ -5365,8 +5366,6 @@ const NAT_STUN = [
 ];
 let natSeen = new Map();  // 内側ポート -> 外から見えた外側ポートの集合
 let natPublicIp = "";     // 自分のグローバルIP(srflx候補から取れる。取得に外部APIは不要)
-let natWarned = false;
-
 // ICE候補を1つ受け取るたびに呼ぶ。
 function natNote(c){
   try {
@@ -5388,18 +5387,53 @@ function natIsSymmetric(){
   return false;
 }
 // 候補収集が終わった時点で判定する。
+// **すぐには出さない。** この判定は「直接つながらない形式かもしれない」であって、
+// 実際には通ることがある(実測: 対称型NATでも接続成功あり)。10秒たっても繋がらない
+// ときだけ出す。接続が failed で確定していれば待たない。
+let natPending = "";    // 検出した理由(まだ出していない)
+let natTimer = null;
+let natWarned = false;  // 一度出したら、そのセッションでは出し直さない
+let natGen = 0;         // 世代。await 明け・破棄で無効化する
+const NAT_WARN_DELAY_MS = 10000;
+
+function natConnOk(){ return !!(pc && pc.connectionState === "connected"); }
+function natFailed(){ return !!(pc && pc.connectionState === "failed"); }
+function natClearTimer(){ if (natTimer){ clearTimeout(natTimer); natTimer = null; } }
+function natHideWarn(){ const el = $("netWarn"); if (el) el.style.display = "none"; }
+
+function natFire(){
+  if (natWarned || !natPending) return;   // 理由が無ければ出さない(無関係な失敗で出さない)
+  if (natConnOk()) return;                // 発火の直前に繋がった(チラつき防止)
+  natWarned = true;
+  natShowWarn(natPending);
+}
+
 async function natVerdict(){
-  if (natWarned) return;
+  if (natWarned || natPending) return;
+  const gen = ++natGen;
   let why = "";
   if (natIsSymmetric()) why = "この回線は直接つながらない形式(対称型NAT)です";
   else if (natPublicIp){
     const carrier = await natLookupCarrier(natPublicIp);
+    if (gen !== natGen) return;           // 待っている間に接続した・破棄された
     if (carrier) why = carrier + " の回線です。直接つながらないことがあります";
   }
   if (!why) return;
-  natWarned = true;
-  natShowWarn(why);
+  if (gen !== natGen || natConnOk()) return;
+  natPending = why;
+  // すでに失敗が確定しているなら待たない(await 中に failed になった場合も拾う)
+  if (natFailed()){ natClearTimer(); natFire(); return; }
+  natTimer = setTimeout(() => { natTimer = null; natFire(); }, NAT_WARN_DELAY_MS);
 }
+
+// 繋がった: 進行中の判定を捨て、タイマーを止め、出ていたら消す
+function natOnConnected(){ natGen++; natClearTimer(); natPending = ""; natHideWarn(); }
+// 失敗が確定: 理由があるときだけ、待たずに出す
+function natOnFailed(){ natClearTimer(); natFire(); }
+// 破棄・作り直し: 判定も表示も**捨てる**。接続の試行ごとに判定し直すので、
+// 「一度出した」状態を持ち越さない(持ち越すと次の試行で黙る)。
+// 前の試行の警告を消さないと、次がNAT非該当でも古い文言が出たままになる。
+function natOnTeardown(){ natGen++; natClearTimer(); natPending = ""; natWarned = false; natHideWarn(); }
 // 回線事業者を調べる(RDAP)。
 //
 // 【エンドポイントを直接指定している理由】親の rdap.apnic.net はリダイレクトを挟み、
@@ -5433,7 +5467,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.19";
+const CLIENT_VERSION = "v0.7.20";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
