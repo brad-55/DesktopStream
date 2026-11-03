@@ -944,9 +944,9 @@
       <div class="controls">
         <span class="fld-inline"><label for="rsRooms">部屋数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
         <span class="fld-inline"><label for="rsSource">映像</label><select id="rsSource">
+          <option value="image">🖼 静止画</option>
           <option value="desktop" selected>🖥 リモートデスクトップ</option>
           <option value="camera">📷 カメラ</option>
-          <option value="image">🖼 静止画</option>
         </select></span>
       </div>
       <div class="controls" id="rsImageRow" style="display:none">
@@ -5121,6 +5121,10 @@ for (const [id, key] of DSS_SETTINGS) rememberSetting(id, key);
 // 戻した値を実際の動作へ反映する(change を発火させない代わり)
 try { applyBuffer(); } catch(e){}
 try { latencyMode = $("latencyMode").value; } catch(e){}
+// 映像ソースが「静止画」で復元されたときは、画像の選択欄も出しておく。
+// change を発火させない方針なので、表示だけをここで合わせる(発火させると
+// 読み込み時にカメラの許可要求や再接続が走る)。
+try { $("rsImageRow").style.display = ($("rsSource").value === "image") ? "" : "none"; } catch(e){}
 
 
 // ===== P2Pが通らない回線の検出 =====
@@ -5211,7 +5215,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.12";
+const CLIENT_VERSION = "v0.7.13";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
