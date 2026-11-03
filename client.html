@@ -3607,6 +3607,10 @@ const RS_AYAME_URL = "wss://ayame-labo.shiguredo.app/signaling";
 const RS_DIST_URL = "https://brad-55.github.io/DesktopStream/secondclient.html";
 const RS_MAX_COMMENTS = 200;
 const RS_MAX_VIDEO_BPS = 500 * 1000; // 視聴者1人あたりの映像ビットレート(500kbps固定)
+// 【撤退経路】?rs=canvas を付けると、captureStream がある環境でも canvas ブリッジを使う。
+// 用途: (1) iPhone 側で別の問題が出たときの切り分け
+//       (2) Android/PC でブリッジ経路を先に試す(A/B 比較)
+const RS_FORCE_CANVAS = new URLSearchParams(location.search).get("rs") === "canvas";
 
 let rsOn = false;
 let rsSlots = [];            // 部屋ごとの状態 {i, room, ws, pc, dc, vSender, closed}
@@ -3623,6 +3627,15 @@ let rsCanvas = null, rsCanvasTimer = null, rsCanvasStream = null; // 静止画�
 let rsDesktopStream = null;  // video.captureStream() の結果
 let rsImageEl = null;        // 選択された静止画
 let rsCropRect = null;       // 静止画のクロップ範囲(正規化 {x,y,w,h})
+
+// ---- canvas ブリッジ(iOS Safari 用)の状態 ----
+// HTMLMediaElement.captureStream が無い環境では、受信映像を canvas へ描いて
+// HTMLCanvasElement.captureStream で取り出す。canvas は作り直さない。作り直すと
+// 取得済みトラックへの供給が途絶え、視聴側が最後の1枚で固まる(例外は出ない)。
+let rsBridgeCanvas = null, rsBridgeCtx = null, rsBridgeStream = null, rsBridgeRAF = 0;
+let rsBridgeLastDraw = 0, rsBridgeDrew = false, rsBridgePausedLogged = false;
+let rsBridgeErrCount = 0, rsBridgeErrSince = 0;
+let rsVideoRoute = "";       // 直近に選ばれた映像経路(開始ログに出す)
 
 let rsBase = localStorage.getItem("dss_rs_base") || "";
 if (rsBase.length !== 32) {
@@ -3641,10 +3654,14 @@ function rsLog(...a){ log("[再配信]", ...a); }
 // ---- 映像ソースの取得(切替時は以前のソースを停止) ----
 async function rsGetVideoTrack(kind){
   rsStopSourceExtras();
+  // desktop から離れるときだけ橋を落とす。ここで毎回落とすと、再取得のたびに
+  // canvas とトラックが作り直され、視聴側が一瞬黒くなる(冪等性が壊れる)。
+  if (kind !== "desktop") rsBridgeTeardown();
   if (kind === "camera"){
     if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia))
       throw new Error("カメラを使えません(HTTPSまたはlocalhostが必要)");
     rsCamStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: {ideal:1280}, height: {ideal:720} } });
+    rsVideoRoute = "カメラ";
     return rsCamStream.getVideoTracks()[0];
   }
   if (kind === "image"){
@@ -3652,18 +3669,51 @@ async function rsGetVideoTrack(kind){
     rsDrawImage();
     rsCanvasStream = rsCanvas.captureStream(5);
     rsCanvasTimer = setInterval(rsDrawImage, 500); // 静止画でもフレームが流れ続けるように
+    rsVideoRoute = "静止画";
     return rsCanvasStream.getVideoTracks()[0];
   }
-  // desktop: プレーヤーで受信中の映像をそのまま利用(送信時にブラウザが再エンコードする)。
-  // captureStreamは受信映像と同一トラックを返すため stop してはいけない。
-  // 一度だけ生成して使い回し、rsStopSourceExtras でも停止対象にしない。
+  // desktop: プレーヤーで受信中の映像を再配信する。取得手段は環境で異なるが、
+  // どちらも「その環境で確実に使える API」だけで選ぶ(UA では分けない)。
+  //   1) HTMLMediaElement.captureStream がある
+  //      → 従来どおり。実機実績のある経路なので変えない。
+  //   2) 無い(iOS Safari)
+  //      → canvas ブリッジ。HTMLCanvasElement.captureStream は iOS Safari 11 以降で使える。
+  //
+  // 対応状況の出典: MDN browser-compat-data(main、2026-11 時点)。
+  //   HTMLMediaElement.captureStream … safari: version_added=false(iOS Safari も mirror で未実装)
+  //   HTMLCanvasElement.captureStream … safari 11 / safari_ios: mirror(実装済み)
+  // ブラウザごとの対応バージョンはここに書かない(手元で実測していないため)。
+  //
+  // 【採らなかった案】受信トラックを別 PeerConnection へ直接 addTrack する。
+  // 標準的な使い方だが iOS での実測が無く、しかも失敗の典型は「addTrack は成功するが
+  // 映像が届かない」で例外にならない。try/catch では守れないため採用しない。
   if (!video.srcObject) throw new Error("リモートデスクトップを受信していません(先にStartしてください)");
-  if (!rsDesktopStream){
-    rsDesktopStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+  if (!video.srcObject.getVideoTracks().length) throw new Error("プレーヤーに映像がありません");
+  const capture = video.captureStream || video.mozCaptureStream;
+  if (capture && !RS_FORCE_CANVAS){
+    // この端末では橋を使わない。過去に作った橋が残っていれば落としておく
+    // (rAF と canvas が動いたままになるのを防ぐ。通常ここに来る時点では存在しない)。
+    if (rsBridgeCanvas || rsBridgeStream) rsBridgeTeardown();
+    // captureStream は受信映像と同一トラックを返すため stop してはいけない。
+    // 一度だけ生成して使い回し、rsStopSourceExtras でも停止対象にしない。
+    // 前回作ったキャプチャが終了していることがある(バックグラウンド復帰・要素の差し替え)。
+    // 終了済みを掴んだまま返すと、例外も出ないのに視聴側が最後の1枚で固まる。
+    if (rsDesktopStream){
+      const cur = rsDesktopStream.getVideoTracks()[0];
+      if (!cur || cur.readyState === "ended"){
+        try { rsDesktopStream.getTracks().forEach(x => { if (x.readyState === "ended") x.stop(); }); } catch(e){}
+        rsDesktopStream = null;
+      }
+    }
+    if (!rsDesktopStream) rsDesktopStream = capture.call(video);
+    const t = rsDesktopStream.getVideoTracks()[0];
+    if (!t){ rsDesktopStream = null; throw new Error("プレーヤーに映像がありません"); }
+    rsVideoRoute = "受信映像を直接(captureStream)";
+    return t;
   }
-  const t = rsDesktopStream.getVideoTracks()[0];
-  if (!t) throw new Error("プレーヤーに映像がありません");
-  return t;
+  const bt = rsBridgeEnsure();
+  rsVideoRoute = "canvasブリッジ(captureStream非対応 または ?rs=canvas)";
+  return bt;
 }
 function rsDrawImage(){
   const ctx = rsCanvas.getContext("2d");
@@ -3688,9 +3738,13 @@ function rsStopSourceExtras(){
   if (rsCanvasStream){ rsCanvasStream.getTracks().forEach(t => t.stop()); rsCanvasStream = null; }
   if (rsCamStream){ rsCamStream.getTracks().forEach(t => t.stop()); rsCamStream = null; }
 }
-// 再配信の完全停止時のみ desktop の captureStream を解放する。
+// 再配信の完全停止時。受信映像のキャプチャと canvas ブリッジの両方を手放す。
+// 中身は rsDropDesktopCapture と同じ(生きている受信トラックは止めない)なので、
+// 同じ処理を2か所に書かず、そちらへ委ねる。
+// 「再配信の停止」は利用者がプレーヤーの視聴を続ける操作である点に注意。
 function rsStopDesktopCapture(){
-  if (rsDesktopStream){ rsDesktopStream.getTracks().forEach(t => t.stop()); rsDesktopStream = null; }
+  rsDropDesktopCapture();
+  rsBridgeTeardown(); // 完全停止時だけ橋を落とす(ソースの差し替えでは落とさない)
 }
 // captureStreamの「参照だけ」を捨てて取り直せるようにする。
 // desktopのcaptureStreamは受信映像と同一トラックのため、生きているトラックを
@@ -3703,6 +3757,157 @@ function rsDropDesktopCapture(){
     rsDesktopStream = null;
   }
 }
+
+// ---- canvas ブリッジ(iOS Safari など HTMLMediaElement.captureStream が無い環境) ----
+// 受信映像を canvas へ描き、canvas の captureStream でトラックを作る。
+//
+// 【作り直さない】canvas を作り直すと、取得済みトラックへの供給が途絶えて視聴側が
+// 最後の1枚で固まる。例外は出ないので気づけない。解像度が変わったときは
+// インスタンスを捨てず width/height をその場で書き換える。
+//
+// 【受信トラックを stop しない】止めるのは自分が作った canvas のトラックだけ。
+// 受信トラックはプレーヤーの映像そのものなので、止めると視聴まで止まる。
+//
+// 【DOM に繋ぐ】iOS Safari は DOM ツリーに無い canvas の描画を省電力で抑制することが
+// あるため、画面外に置いて DOM に接続しておく(表示はされない)。
+//
+// 事実の出典: MDN browser-compat-data(main、2026-11 時点)で
+// HTMLMediaElement.captureStream は safari: version_added=false、
+// HTMLCanvasElement.captureStream は safari: 11 / safari_ios: mirror。
+function rsBridgeEnsure(){
+  if (!rsBridgeCanvas){
+    // 受信直後は videoWidth が 0 のことがある。0x0 の canvas に captureStream すると
+    // 以後サイズが追随せず黒画面のまま固まるため、寸法が分かるときはそれで、
+    // 分からないときだけ 1280x720 で作る。実フレームが来たら描画ループが寸法を合わせる。
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const known = vw > 0 && vh > 0;
+    const s = known ? Math.min(1, 1280 / Math.max(vw, vh)) : 1;
+    rsBridgeCanvas = document.createElement("canvas");
+    rsBridgeCanvas.width  = known ? Math.max(2, ((Math.round(vw * s)) & ~1)) : 1280;
+    rsBridgeCanvas.height = known ? Math.max(2, ((Math.round(vh * s)) & ~1)) : 720;
+    rsBridgeCtx = rsBridgeCanvas.getContext("2d");
+    // 画面外に置いて DOM に接続する(表示はされない。captureStream には影響しない)
+    rsBridgeCanvas.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+    try { document.body.appendChild(rsBridgeCanvas); } catch(e){}
+    // 未初期化バッファのまま captureStream すると最初のフレームが出ないことがあるため黒で塗る
+    rsBridgeCtx.fillStyle = "#000";
+    rsBridgeCtx.fillRect(0, 0, rsBridgeCanvas.width, rsBridgeCanvas.height);
+    rsBridgeLastDraw = 0;
+  }
+  if (!rsBridgeStream){
+    if (!rsBridgeCanvas.captureStream){
+      rsBridgeTeardown(); // 画面外に置いた canvas を DOM から外してから投げる
+      throw new Error("この端末は再配信の映像を作れません(captureStream非対応)");
+    }
+    // 引数なし = canvas が更新されたときだけ取得する。描画側で約15fpsに絞るので
+    // レート制御は1箇所に集約される。captureStream(15) と二重に絞ると位相ズレで
+    // 実効fpsが落ちる(ビート)ため、ここでは fps を指定しない。
+    rsBridgeStream = rsBridgeCanvas.captureStream();
+  }
+  let bt = rsBridgeStream.getVideoTracks()[0];
+  if (bt && bt.readyState === "ended"){
+    // 終了したトラックを返し続けると、例外も出ないのに視聴側が最後の1枚で固まる。
+    // ストリームだけ捨てて取り直す(canvas は残すので rAF もそのまま)。
+    try { rsBridgeStream.getTracks().forEach(x => { try { x.stop(); } catch(e){} }); } catch(e){}
+    rsBridgeStream = null;
+    // 取り直し自体が失敗する環境(省電力で captureStream が拒否される等)があるので、
+    // 止めた参照を残さずに落とす。残すと次回もその死んだストリームを掴む。
+    try { rsBridgeStream = rsBridgeCanvas.captureStream(); } catch(e){ rsBridgeStream = null; }
+    bt = rsBridgeStream ? rsBridgeStream.getVideoTracks()[0] : null;
+  }
+  if (!bt){
+    // トラックが無いのにストリームを残すと、次回もその空ストリームを掴んで自己回復しない
+    if (rsBridgeStream){ try { rsBridgeStream.getTracks().forEach(x => x.stop()); } catch(e){} }
+    rsBridgeStream = null;
+    throw new Error("canvas から映像トラックを作れませんでした");
+  }
+  rsBridgeWake();
+  return bt;
+}
+
+// ループの蘇生。バックグラウンドで rAF が止まると id が残ったまま発火しなくなり、
+// 二重起動ガードに弾かれて二度と再開できなくなる。呼ばれたら必ず張り直す。
+// 呼ぶ場所: (1) rsBridgeEnsure(再取得時) (2) visibilitychange の復帰時
+function rsBridgeWake(){
+  if (!rsBridgeCanvas || !rsBridgeStream) return;
+  if (rsBridgeRAF){ cancelAnimationFrame(rsBridgeRAF); rsBridgeRAF = 0; }
+  rsBridgeLastDraw = 0;
+  rsBridgeErrCount = 0; rsBridgeErrSince = 0;
+  rsBridgeLoopStart();
+}
+
+function rsBridgeLoopStart(){
+  if (rsBridgeRAF) return; // 二重起動の禁止
+  const loop = (now) => {
+    // 残弾ガードは再武装より前。teardown 後に1回だけ発火しても、ここで抜けて
+    // 二度と再武装しない(張り直すのは rsBridgeWake の役目)。
+    if (!rsBridgeCanvas || !rsBridgeCtx){ rsBridgeRAF = 0; return; }
+    rsBridgeRAF = requestAnimationFrame(loop);
+    try {
+      if (now - rsBridgeLastDraw < 66) return; // 約15fpsに間引く(60fpsで描かない)
+      const vw = video.videoWidth, vh = video.videoHeight;
+      // フレーム未到達では描かない。ただし次の試行まで間引く(空回りで電池を食わない)
+      if (video.readyState < 2 || !vw || !vh){ rsBridgeLastDraw = now; return; }
+      if (video.paused){
+        if (!rsBridgePausedLogged){
+          rsBridgePausedLogged = true;
+          rsLog("受信映像が一時停止中です(canvasブリッジは最後のフレームのまま)");
+        }
+        // 止まっている間は同じ絵を描き続けない(電池とCPUの無駄。送る絵も変わらない)
+        rsBridgeLastDraw = now;
+        return;
+      }
+      if (rsBridgePausedLogged) rsBridgePausedLogged = false;
+      const s = Math.min(1, 1280 / Math.max(vw, vh));
+      // H.264 の 4:2:0 は偶数解像度を要求する。奇数だと緑の帯やエンコード失敗になる。
+      const cw = Math.max(2, (Math.round(vw * s)) & ~1), ch = Math.max(2, (Math.round(vh * s)) & ~1);
+      if (rsBridgeCanvas.width !== cw || rsBridgeCanvas.height !== ch){
+        rsBridgeCanvas.width = cw; rsBridgeCanvas.height = ch; // 作り直さず寸法だけ変える
+      }
+      rsBridgeCtx.drawImage(video, 0, 0, cw, ch);
+      rsBridgeLastDraw = now;
+      rsBridgeErrCount = 0; rsBridgeErrSince = 0;
+      if (!rsBridgeDrew){
+        rsBridgeDrew = true;
+        rsLog("受信映像の初回フレームを取り込みました(canvasブリッジ)");
+      }
+    } catch(e){
+      // 1回の例外で配信を固めない(静かな失敗を作らない)。失敗が2秒続いたときだけ
+      // 止める。止める場合も理由をログに残す。復帰は rsBridgeWake が張り直す。
+      // 例外時も間引き時刻を進める。進めないと 66ms 制限を素通りして毎フレームで
+      // 例外を投げ続け、CPU とログを焼き切る。
+      rsBridgeLastDraw = now;
+      rsBridgeErrCount++;
+      if (rsBridgeErrCount === 1){
+        rsBridgeErrSince = now;
+        rsLog("canvasブリッジの描画で例外:", e.message || e);
+      }
+      if (rsBridgeErrSince && now - rsBridgeErrSince > 2000){
+        if (rsBridgeRAF){ cancelAnimationFrame(rsBridgeRAF); rsBridgeRAF = 0; }
+        rsLog("canvasブリッジの描画を停止しました(2秒間つづけて失敗。タブを切り替えるか再配信を開き直すと復帰します)");
+      }
+    }
+  };
+  rsBridgeRAF = requestAnimationFrame(loop);
+}
+
+function rsBridgeTeardown(){
+  if (rsBridgeRAF){ cancelAnimationFrame(rsBridgeRAF); rsBridgeRAF = 0; }
+  if (rsBridgeStream){
+    // 止めてよいのは「自分が作った canvas のトラック」だけ。
+    // 受信トラック(プレーヤーの映像)は絶対に止めない。止めると視聴も止まる。
+    rsBridgeStream.getTracks().forEach(t => { try { t.stop(); } catch(e){} });
+    rsBridgeStream = null;
+  }
+  if (rsBridgeCanvas && rsBridgeCanvas.parentNode){
+    try { rsBridgeCanvas.parentNode.removeChild(rsBridgeCanvas); } catch(e){}
+  }
+  rsBridgeCanvas = null; rsBridgeCtx = null;
+  rsBridgeDrew = false; rsBridgePausedLogged = false;
+  rsBridgeErrCount = 0; rsBridgeErrSince = 0;
+  rsBridgeLastDraw = 0;
+}
+
 async function rsSwitchSource(){
   const kind = $("rsSource").value;
   $("rsImageRow").style.display = (kind === "image") ? "" : "none";
@@ -4170,6 +4375,7 @@ async function rsStart(){
   rsUpdateDeskAudioBtn();
   $("rsRooms").disabled = true;
   $("rsCap").textContent = rooms;
+  rsLog("映像経路: " + (rsVideoRoute || "不明"));
   rsLog(`再配信を開始しました (${rooms}部屋, 映像${RS_MAX_VIDEO_BPS/1000}kbps固定, H.265優先)`);
   rsAcquireWakeLock(); // 画面スリープで配信が止まるのを防ぐ
   rsUpdatePreview();
@@ -4625,6 +4831,7 @@ function rsReleaseWakeLock(){
 }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible"){
+    rsBridgeWake(); // rAF が止まっていても張り直す(二重起動ガードに弾かれたまま復帰しないのを防ぐ)
     rsAcquireWakeLock();
     // バックグラウンドで配信が止まり黒画面のまま固まることがあるため、
     // 復帰時は選択中の映像ソース(デスクトップ/カメラ/静止画)を取り直す(修正6)
@@ -4932,7 +5139,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.9";
+const CLIENT_VERSION = "v0.7.10";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
