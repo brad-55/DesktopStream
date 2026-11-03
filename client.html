@@ -1234,6 +1234,8 @@ const I18N_EN = {
   "@PCの画面をロックします(Win+L相当)": "Locks the PC (same as Win+L)",
   // ---- 配信タブ ----
   "📡 配信を開始": "📡 Start streaming",
+  "PCに接続していません": "Not connected to the PC",
+  "接続すると自動で映像が届きます": "Video arrives automatically once connected",
   "⏹ 配信を停止": "⏹ Stop streaming",
   "🎙 マイクON": "🎙 Mic ON",
   "🔇 ミュート中": "🔇 Mic muted",
@@ -3655,7 +3657,7 @@ async function rsGetVideoTrack(kind){
   rsStopSourceExtras();
   // desktop から離れるときだけ橋を落とす。ここで毎回落とすと、再取得のたびに
   // canvas とトラックが作り直され、視聴側が一瞬黒くなる(冪等性が壊れる)。
-  if (kind !== "desktop") rsBridgeTeardown();
+  if (kind !== "desktop"){ rsBridgeTeardown(); rsWaitTeardown(); }
   if (kind === "camera"){
     if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia))
       throw new Error("カメラを使えません(HTTPSまたはlocalhostが必要)");
@@ -3686,8 +3688,14 @@ async function rsGetVideoTrack(kind){
   // 【採らなかった案】受信トラックを別 PeerConnection へ直接 addTrack する。
   // 標準的な使い方だが iOS での実測が無く、しかも失敗の典型は「addTrack は成功するが
   // 映像が届かない」で例外にならない。try/catch では守れないため採用しない。
-  if (!video.srcObject) throw new Error("リモートデスクトップを受信していません(先にStartしてください)");
-  if (!video.srcObject.getVideoTracks().length) throw new Error("プレーヤーに映像がありません");
+  if (!rsLiveVideoTracks().length){
+    // PCに接続していない(未認証・PCが落ちている・Start前)。配信は始められるようにし、
+    // 映像だけ待機画面にする。接続して映像が届けば ontrack → rsScheduleReacquire が走り、
+    // ここが実映像を返すようになるので、全視聴者のトラックが replaceTrack で差し替わる。
+    rsVideoRoute = "待機中(PCに接続していません。接続後に自動で切り替わります)";
+    rsLog("PCに接続していないため、映像は接続後に届きます(配信は開始できます)");
+    return rsWaitEnsure();
+  }
   const capture = video.captureStream || video.mozCaptureStream;
   if (capture && !RS_FORCE_CANVAS){
     // この端末では橋を使わない。過去に作った橋が残っていれば落としておく
@@ -3708,10 +3716,14 @@ async function rsGetVideoTrack(kind){
     const t = rsDesktopStream.getVideoTracks()[0];
     if (!t){ rsDesktopStream = null; throw new Error("プレーヤーに映像がありません"); }
     rsVideoRoute = "受信映像を直接(captureStream)";
+    // 実映像が取れてから待機画面を落とす(取得に失敗したときに送信側が
+    // 停止済みトラックを掴んだままになるのを防ぐ)。
+    if (rsWaitStream) rsWaitTeardown();
     return t;
   }
   const bt = rsBridgeEnsure();
   rsVideoRoute = "canvasブリッジ(captureStream非対応 または ?rs=canvas)";
+  if (rsWaitStream) rsWaitTeardown();
   return bt;
 }
 function rsDrawImage(){
@@ -3744,6 +3756,7 @@ function rsStopSourceExtras(){
 function rsStopDesktopCapture(){
   rsDropDesktopCapture();
   rsBridgeTeardown(); // 完全停止時だけ橋を落とす(ソースの差し替えでは落とさない)
+  rsWaitTeardown();   // 待機画面も同じく完全停止時だけ落とす
 }
 // captureStreamの「参照だけ」を捨てて取り直せるようにする。
 // desktopのcaptureStreamは受信映像と同一トラックのため、生きているトラックを
@@ -3755,6 +3768,63 @@ function rsDropDesktopCapture(){
     rsDesktopStream.getTracks().forEach(t => { if (t.readyState === "ended"){ try { t.stop(); } catch(e){} } });
     rsDesktopStream = null;
   }
+}
+
+// ---- 配信の待機画面(PCに接続していないとき) ----
+// 【配信はリモート接続サーバーの状態に依存させない】未認証・PCが落ちている・Start前でも
+// 配信そのものは始められるようにする。映像だけ待機画面にしておき、接続して映像が
+// 届いたら replaceTrack で差し替える(再ネゴシエーション不要)。
+let rsWaitCanvas = null, rsWaitStream = null, rsWaitTimer = null, rsWaitDotOn = false;
+function rsWaitDraw(){
+  if (!rsWaitCanvas) return;
+  const c = rsWaitCanvas.getContext("2d");
+  c.fillStyle = "#0d1116"; c.fillRect(0, 0, 1280, 720);
+  c.fillStyle = "#8a93a0"; c.textAlign = "center";
+  c.font = "44px sans-serif";
+  c.fillText(T("PCに接続していません"), 640, 330);
+  c.font = "28px sans-serif";
+  c.fillText(T("接続すると自動で映像が届きます"), 640, 392);
+  // 【毎秒描き直す】canvas は「内容が変わったとき」しかフレームを出さない実装があり、
+  // 一度描いたきりだと**後から入室した視聴者にキーフレームが届かず黒いまま**になる。
+  // 点を点滅させて、待機中であることも視聴者に伝える。
+  // 点滅は時刻ではなく**呼ぶたびに反転するフラグ**で行う。時刻の剰余だとタイマーの
+  // ゆらぎで同じ値が2回続くことがあり、その回は絵が変わらずフレームが出ない。
+  rsWaitDotOn = !rsWaitDotOn;
+  c.fillStyle = rsWaitDotOn ? "#2ecf8e" : "#39434d";
+  c.beginPath(); c.arc(640, 470, 13, 0, Math.PI * 2); c.fill();
+}
+function rsWaitEnsure(){
+  if (!rsWaitCanvas){
+    rsWaitCanvas = document.createElement("canvas");
+    rsWaitCanvas.width = 1280; rsWaitCanvas.height = 720;
+  }
+  // captureStream を張ってから描く。描いてから張ると、その最初の1枚が
+  // 取得前の変更として扱われ、初回フレームが届かないことがある。
+  // 引数なし = canvas が変わったときだけ取得する。描画側が1秒ごとに絵を変えるので
+  // 実効 1fps になり、タイマーとキャプチャの位相に依存しない。
+  if (!rsWaitStream || !rsWaitStream.getVideoTracks()[0]
+      || rsWaitStream.getVideoTracks()[0].readyState === "ended"){
+    rsWaitStream = rsWaitCanvas.captureStream();
+  }
+  // 取得の直後に必ず1枚描く(前の絵が残っていると、次の変更までフレームが
+  // 出ない実装がある)。送信に載るのは呼び出し元が addTrack/replaceTrack した後で、
+  // それまでの最大1秒は前の絵が留まりうるが、タイマーが上限を担保する。
+  rsWaitDraw();
+  if (!rsWaitTimer) rsWaitTimer = setInterval(rsWaitDraw, 1000);
+  const t = rsWaitStream.getVideoTracks()[0];
+  if (!t) throw new Error("待機画面を作れませんでした");
+  return t;
+}
+function rsWaitTeardown(){
+  if (rsWaitTimer){ clearInterval(rsWaitTimer); rsWaitTimer = null; }
+  if (rsWaitStream){ rsWaitStream.getTracks().forEach(t => { try { t.stop(); } catch(e){} }); rsWaitStream = null; }
+  rsWaitCanvas = null;
+}
+// 受信中の映像トラックのうち、終了していないもの。0件なら「映像が来ていない」。
+function rsLiveVideoTracks(){
+  const ms = video.srcObject;
+  if (!ms || !ms.getVideoTracks) return [];
+  return ms.getVideoTracks().filter(t => t.readyState !== "ended");
 }
 
 // ---- canvas ブリッジ(iOS Safari など HTMLMediaElement.captureStream が無い環境) ----
@@ -4363,6 +4433,9 @@ async function rsStart(){
   await rsAcquireMic();
   // PC音声をWeb Audio経由で独立トラック化する(マイクとはミックスせず別トラックで送る)
   rsBuildAudioMix();
+  // 自動再生ポリシーで AudioContext が suspended のまま始まることがある。押下の
+  // この時点で起こしておく(以後の resume は復帰処理側でも行う)。
+  if (rsAudioCtx && rsAudioCtx.state === "suspended"){ try { rsAudioCtx.resume(); } catch(e){} }
   try { rsVideoTrack = await rsGetVideoTrack($("rsSource").value); }
   catch(e){ rsLog("開始できません:", e.message || e); rsStopMedia(); return; }
   rsOn = true;
@@ -5138,7 +5211,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.11";
+const CLIENT_VERSION = "v0.7.12";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
