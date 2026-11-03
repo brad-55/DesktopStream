@@ -424,11 +424,57 @@
   }
 
   /* ---------- 配信 ---------- */
-  #rsPreview { width: 160px; border-radius: var(--r-cell); background: #000; display: block; }
-  #rsUrl { flex: 1; min-width: 160px; font-family: var(--mono); }
+  /* 状態 → 主操作 → 配る → 見ている人 → 設定(畳む) → 履歴(畳む) の順に並べる。
+     カードに分けて強弱を付け、配信中は設定を畳んで重心を「状態」と「配る」へ移す。 */
+  .rsc-status {
+    display: flex; align-items: center; gap: 10px; min-width: 0;
+    background: var(--bg-2); border-radius: var(--r-card); padding: 12px;
+  }
+  .rsc-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex: none;
+    background: var(--bg-3); border: .5px solid var(--separator);
+  }
+  .rsc-dot.on { background: var(--tint); border-color: transparent; }
+  .rsc-grow { flex: 1 1 auto; min-width: 0; }
+  .rsc-state { font-size: var(--fs-sub); font-weight: 600; overflow-wrap: anywhere; }
+  .rsc-sub { font-size: var(--fs-body); color: var(--label-2); }
+  .rsc-sub b { font-family: var(--mono); color: var(--label); }
+  .rsc-thumb {
+    width: 104px; height: 59px; flex: none; overflow: hidden;
+    border-radius: var(--r-cell); background: #000; border: .5px solid var(--separator);
+  }
+  #rsPreview { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .rsc-card {
+    background: var(--bg-2); border-radius: var(--r-card); padding: 12px;
+    display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  }
+  .rsc-main { width: 100%; }
+  .rsc-tglrow { display: flex; gap: 8px; }
+  .rsc-tgl { flex: 1 1 0; min-width: 0; }
+  .rsc-tgl[aria-pressed="true"] { border-color: var(--tint); }
+  .rsc-hrow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .rsc-h { font-size: var(--fs-sub); font-weight: 600; }
+  .rsc-urlrow { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  .rsc-urlrow button { flex: none; }
+  .rsc-more { background: var(--bg-2); border-radius: var(--r-card); }
+  .rsc-more > summary {
+    list-style: none; cursor: pointer; min-height: 44px;
+    display: flex; align-items: center; padding: 0 12px;
+    font-size: var(--fs-sub); font-weight: 600;
+  }
+  .rsc-more > summary::-webkit-details-marker { display: none; }
+  .rsc-more > summary::after {
+    content: "›"; margin-left: auto; color: var(--label-2);
+    display: inline-block; transition: transform .2s var(--ease);
+  }
+  .rsc-more[open] > summary::after { transform: rotate(90deg); }
+  .rsc-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+  #rsUrl { flex: 1 1 auto; min-width: 0; font-family: var(--mono); }
   #rsTitle, #rsPass, #bcText { flex: 1; min-width: 140px; }
   #rsQr { margin-top: 8px; background: #fff; padding: 8px; border-radius: var(--r-cell); width: fit-content; }
   #rsQr:empty { display: none; padding: 0; margin: 0; }
+  /* QRは「配る」カードの中に収める。大きくすると画面の1/3を占めて主役を奪う。 */
+  #rsQr canvas, #rsQr img { width: 120px; height: 120px; display: block; }
   #rsCropStage { position: relative; display: inline-block; max-width: 100%; }
   #rsCropCanvas { display: block; max-width: 100%; border-radius: var(--r-cell); }
   #rsCropBox { position: absolute; border: 2px solid var(--tint); box-shadow: 0 0 0 9999px rgba(0,0,0,.5); cursor: move; }
@@ -437,11 +483,18 @@
   .rh[data-h="ne"] { right: -7px; top: -7px; cursor: nesw-resize; }
   .rh[data-h="sw"] { left: -7px; bottom: -7px; cursor: nesw-resize; }
   .rh[data-h="se"] { right: -7px; bottom: -7px; cursor: nwse-resize; }
-  #rsViewers { display: flex; flex-wrap: wrap; gap: 6px; }
+  #rsViewers { display: flex; flex-direction: column; gap: 6px; }
   .rs-viewer {
-    font-size: var(--fs-body); padding: 4px 10px; border-radius: var(--r-pill);
-    background: var(--bg-3); color: var(--label-2);
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+    font-size: var(--fs-body); padding: 4px 6px 4px 12px;
+    border-radius: var(--r-cell); background: var(--bg);
+    color: var(--label-2); border: .5px solid var(--separator);
   }
+  .rs-viewer > span {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rs-viewer > button { flex: none; }
   .rs-viewer.rs-cur { background: #2f4a38; color: var(--label); } /* color-mix 未対応環境向け */
   .rs-viewer.rs-cur { background: color-mix(in srgb, var(--tint) 22%, var(--bg-3)); }
   #rsRoster, #rsComments {
@@ -933,55 +986,81 @@
     <!-- 設定タブ -->
     <!-- 配信タブ: 受信中の映像(またはカメラ/静止画)+マイクをAyame経由で複数視聴者へ配信 -->
     <div class="tabpage" id="tab-restream">
-      <div class="controls primary-controls">
-        <button id="rsToggle">📡 配信を開始</button>
-        <button id="rsMic" disabled>🎙 マイクON</button>
-        <button id="rsDeskAudio">🔊 PC音声OFF</button>
+      <!-- 上から「状態 → 主操作 → 配る → 見ている人 → 設定 → 履歴」の順。
+           設定と履歴は details で畳む(配信中に誤って触らないため)。
+           開閉は状態に応じて JS が行う(配信前は開く / 配信中は閉じる)。 -->
+      <div class="rsc-status">
+        <span class="rsc-dot" id="rsDot"></span>
+        <div class="rsc-grow">
+          <div class="rsc-state" id="rsState">停止中</div>
+          <div class="rsc-sub">視聴者 <b id="rsCount">0</b> / <span id="rsCap">0</span> 人</div>
+        </div>
+        <div class="rsc-thumb" id="rsPreviewRow" style="display:none"><video id="rsPreview" autoplay playsinline muted></video></div>
       </div>
-      <!-- 配信に実際に使っている映像のミニプレビュー -->
-      <div class="controls" id="rsPreviewRow" style="display:none">
-        <video id="rsPreview" autoplay playsinline muted></video>
-        <span class="hintline">↑配信中の映像</span>
+
+      <!-- 主操作は常に1つ。マイク/PC音声はその直下の副操作に下げる。 -->
+      <div class="rsc-card">
+        <button id="rsToggle" class="rsc-main">📡 配信を開始</button>
+        <div class="rsc-tglrow">
+          <button id="rsMic" class="rsc-tgl" disabled aria-pressed="false">🎙 マイク<span class="sw">OFF</span></button>
+          <button id="rsDeskAudio" class="rsc-tgl" aria-pressed="false">🔊 PC音声<span class="sw">OFF</span></button>
+        </div>
       </div>
-      <div class="controls">
-        <span class="fld-inline"><label for="rsRooms">部屋数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
-        <span class="fld-inline"><label for="rsSource">映像</label><select id="rsSource">
-          <option value="image">🖼 静止画</option>
-          <option value="desktop" selected>🖥 リモートデスクトップ</option>
-          <option value="camera">📷 カメラ</option>
-        </select></span>
-      </div>
-      <div class="controls" id="rsImageRow" style="display:none">
-        <input id="rsImageFile" type="file" accept="image/*" />
-      </div>
-      <div id="rsCropWrap" style="display:none">
-        <div class="hintline">枠をドラッグ/リサイズして切り取り範囲を調整(配信中は即時反映)</div>
-        <div id="rsCropStage"><canvas id="rsCropCanvas"></canvas><div id="rsCropBox"><span class="rh" data-h="nw"></span><span class="rh" data-h="ne"></span><span class="rh" data-h="sw"></span><span class="rh" data-h="se"></span></div></div>
-        <div class="controls"><button id="rsCropReset">全体に戻す</button></div>
-      </div>
-      <div class="controls">
-        <span class="fld-inline"><label for="rsTitle">タイトル</label><input id="rsTitle" type="text" maxlength="40" placeholder="配信タイトル(任意)" /></span>
-      </div>
-      <div class="controls">
-        <span class="fld-inline"><label for="rsPass">合言葉</label><input id="rsPass" type="text" maxlength="20" placeholder="未設定なら誰でも視聴可" /></span>
-        <button id="rsRegen">視聴URLを再生成</button>
-      </div>
-      <div class="controls">
-        <span class="hintline">視聴者: <span id="rsCount">0</span> / <span id="rsCap">0</span> 人</span>
-      </div>
-      <div id="rsViewers"></div>
-      <div class="fld">
-        <label for="rsUrl">視聴用URL(配信中に有効)</label>
-        <div class="controls">
+
+      <!-- 配る手段(URL と QR)を1枚にまとめる -->
+      <div class="rsc-card">
+        <div class="rsc-hrow"><span class="rsc-h">見せたい人に配る</span></div>
+        <div class="rsc-urlrow">
           <input id="rsUrl" type="text" readonly placeholder="配信を開始すると表示されます" />
           <button id="rsCopy">コピー</button>
         </div>
         <div id="rsQr"></div>
+        <span class="hintline">QRを読み取ってもらうと、そのまま開けます</span>
       </div>
-      <div class="fld">
-        <label>視聴者履歴</label>
-        <div id="rsRoster">まだ視聴者はいません</div>
+
+      <div class="rsc-card">
+        <div class="rsc-hrow"><span class="rsc-h">いま見ている人</span></div>
+        <div id="rsViewers"></div>
       </div>
+
+      <!-- 設定は畳む。配信中に触る必要がないものをここへ集める。 -->
+      <details class="rsc-more" id="rsSetWrap">
+        <summary>配信の設定</summary>
+        <div class="rsc-body">
+          <div class="controls">
+            <span class="fld-inline"><label for="rsRooms">部屋数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
+            <span class="fld-inline"><label for="rsSource">映像</label><select id="rsSource">
+              <option value="image">🖼 静止画</option>
+              <option value="desktop" selected>🖥 リモートデスクトップ</option>
+              <option value="camera">📷 カメラ</option>
+            </select></span>
+          </div>
+          <div class="controls" id="rsImageRow" style="display:none">
+            <input id="rsImageFile" type="file" accept="image/*" />
+          </div>
+          <div id="rsCropWrap" style="display:none">
+            <div class="hintline">枠をドラッグ/リサイズして切り取り範囲を調整(配信中は即時反映)</div>
+            <div id="rsCropStage"><canvas id="rsCropCanvas"></canvas><div id="rsCropBox"><span class="rh" data-h="nw"></span><span class="rh" data-h="ne"></span><span class="rh" data-h="sw"></span><span class="rh" data-h="se"></span></div></div>
+            <div class="controls"><button id="rsCropReset">全体に戻す</button></div>
+          </div>
+          <div class="controls">
+            <span class="fld-inline"><label for="rsTitle">タイトル</label><input id="rsTitle" type="text" maxlength="40" placeholder="配信タイトル(任意)" /></span>
+          </div>
+          <div class="controls">
+            <span class="fld-inline"><label for="rsPass">合言葉</label><input id="rsPass" type="text" maxlength="20" placeholder="未設定なら誰でも視聴可" /></span>
+          </div>
+          <button id="rsRegen">視聴URLを再生成</button>
+          <span class="hintline">部屋数は配信中に変えられません(停止してから変更)</span>
+        </div>
+      </details>
+
+      <details class="rsc-more" id="rsHistWrap">
+        <summary>視聴者履歴</summary>
+        <div class="rsc-body">
+          <div id="rsRoster">まだ視聴者はいません</div>
+        </div>
+      </details>
+
       <span class="hintline">※マイクとカメラはHTTPSまたはlocalhostでのみ利用できます。「リモートデスクトップ」はプレーヤーで受信中の映像を配信します。</span>
     </div>
 
@@ -1237,6 +1316,15 @@ const I18N_EN = {
   "@PCの画面をロックします(Win+L相当)": "Locks the PC (same as Win+L)",
   // ---- 配信タブ ----
   "📡 配信を開始": "📡 Start streaming",
+  "配信中": "Streaming",
+  "停止中": "Stopped",
+  "見せたい人に配る": "Share with others",
+  "いま見ている人": "Watching now",
+  "配信の設定": "Stream settings",
+  "視聴者": "Viewers",
+  "まだ誰も見ていません": "No one is watching yet",
+  "QRを読み取ってもらうと、そのまま開けます": "They can scan the QR code to open it",
+  "部屋数は配信中に変えられません(停止してから変更)": "Room count cannot be changed while streaming",
   "PCに接続していません": "Not connected to the PC",
   "接続すると自動で映像が届きます": "Video arrives automatically once connected",
   "⏹ 配信を停止": "⏹ Stop streaming",
@@ -3983,6 +4071,8 @@ function rsBridgeTeardown(){
 async function rsSwitchSource(){
   const kind = $("rsSource").value;
   $("rsImageRow").style.display = (kind === "image") ? "" : "none";
+  // 設定は畳んである。画像やカメラを選んだ直後は操作が要るので開く(デスクトップは開かない)。
+  if (kind !== "desktop" && $("rsSetWrap")) $("rsSetWrap").open = true;
   if (!rsOn) return;
   try {
     const t = await rsGetVideoTrack(kind);
@@ -4209,6 +4299,13 @@ function rsUpdateCount(){
     btn.onclick = () => { rsLog(`視聴者を切断しました (room ${rsPad3(s.i)})`); rsResetSlot(s); };
     row.appendChild(nm); row.appendChild(btn);
     box.appendChild(row);
+  }
+  // 誰も見ていないときに空白だけ残さない(配信は始まっているのに何も出ない、と迷わせない)
+  if (!box.children.length){
+    const e = document.createElement("div");
+    e.className = "hintline";
+    e.textContent = T("まだ誰も見ていません");
+    box.appendChild(e);
   }
 }
 
@@ -4446,7 +4543,11 @@ async function rsStart(){
   for (let i = 1; i <= rooms; i++) rsOpenSlot(i);
   rsShowShareUrl(); // 視聴用URL/QRを表示(開始前と同じ内容)
   $("rsToggle").textContent = T("⏹ 配信を停止");
+  $("rsState").textContent = T("配信中");
+  $("rsDot").classList.add("on");
+  if ($("rsSetWrap")) $("rsSetWrap").open = false; // 配信中は設定を畳む(誤タッチを減らす)
   $("rsMic").disabled = !rsMicTrack;
+  rsSetToggle($("rsMic"), !rsMuted && !!rsMicTrack);
   rsUpdateDeskAudioBtn();
   $("rsRooms").disabled = true;
   $("rsCap").textContent = rooms;
@@ -4485,7 +4586,10 @@ function rsStop(){
   rsSlots = [];
   rsStopMedia();
   $("rsToggle").textContent = T("📡 配信を開始");
+  $("rsState").textContent = T("停止中");
+  $("rsDot").classList.remove("on");
   $("rsMic").disabled = true;
+  rsSetToggle($("rsMic"), false);
   $("rsRooms").disabled = false;
   rsShowShareUrl(); // 停止後も視聴用URLは見えるようにしておく
   $("rsCount").textContent = "0"; $("rsCap").textContent = "0";
@@ -4513,7 +4617,7 @@ $("rsToggle").onclick = () => { if (rsOn) rsStop(); else rsStart(); };
 $("rsMic").onclick = () => {
   rsMuted = !rsMuted;
   if (rsMicTrack) rsMicTrack.enabled = !rsMuted; // マイクは独立トラックなので enabled で即消音
-  $("rsMic").textContent = T(rsMuted ? "🔇 ミュート中" : "🎙 マイクON");
+  rsSetToggle($("rsMic"), !rsMuted);
 };
 $("rsRooms").addEventListener("input", () => { if (!rsOn) rsShowShareUrl(); });
 $("rsSource").addEventListener("change", rsSwitchSource);
@@ -5048,11 +5152,16 @@ function rsTeardownAudioMix(){
   if (rsAudioCtx){ try { rsAudioCtx.close(); } catch(e){} rsAudioCtx = null; }
   rsAudioDest = null; rsDeskTrack = null;
 }
+// トグルボタン(マイク/PC音声)の見た目を状態に合わせる。
+// 【textContent で書き換えない】絵柄と文言が入った span 構造が壊れるため、札(.sw)だけを書き換える。
+function rsSetToggle(btn, on){
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  const sw = btn.querySelector(".sw");
+  if (sw) sw.textContent = on ? "ON" : "OFF";
+}
 function rsUpdateDeskAudioBtn(){
-  const b = $("rsDeskAudio");
-  if (!b) return;
-  b.textContent = T(rsDeskAudioOn ? "🔊 PC音声ON" : "🔊 PC音声OFF");
-  b.classList.toggle("rec-on", rsDeskAudioOn); // ONを目立たせる(録画中と同じ強調)
+  rsSetToggle($("rsDeskAudio"), rsDeskAudioOn);
 }
 $("rsDeskAudio").onclick = () => {
   rsDeskAudioOn = !rsDeskAudioOn;
@@ -5218,7 +5327,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.14";
+const CLIENT_VERSION = "v0.7.15";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
