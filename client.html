@@ -144,25 +144,10 @@
   }
   #rightcol { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
   /* 映像が静止画/カメラのとき、配信/コメントタブではヘッダーと映像を消して広く使う。
-     接続状態は connrow が受ける(ヘッダーの点・状態・再接続を失わないため)。 */
+     ヘッダーごと消す(利用者の指示: ステータス表示とボタンは要らない)。 */
   body.compact #hdr { display: none; }
   body.compact #app { padding-top: calc(12px + env(safe-area-inset-top)); }
   body.compact #app > .stage { display: none; }   /* 隠すだけ。トラックは止めない(操作タブへ戻った瞬間に使う) */
-  .connrow {
-    display: flex; align-items: center; gap: 8px; flex: none;
-    padding: 4px 10px; min-height: 32px; border-radius: var(--r-cell);
-    background: var(--bg-2); border: .5px solid var(--separator);
-  }
-  .connrow[hidden] { display: none; }
-  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; flex: none; }
-  .conn-dot.ok { background: #2ecf8e; }
-  .conn-dot.err { background: #ff5b5b; }
-  .conn-dot.warn { background: #e8a13a; }
-  .conn-text {
-    flex: 1; min-width: 0; font-size: var(--fs-body); color: var(--label-2);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .conn-btn { flex: none; min-height: 28px; padding: 3px 10px; font: inherit; }  /* 文字サイズは継承(型スケールを増やさない) */
   /* 配信プレビュー: 16:9 を保ち、縦横どちらでも画面を突き抜けないよう両軸に上限を置く */
   .pv {
     position: relative; width: 100%; aspect-ratio: 16/9; flex: none;
@@ -913,13 +898,6 @@
   <span id="state" aria-live="polite">disconnected</span>
   <button id="reconnBtn" class="hdr-btn">再接続</button>
 </header>
-<!-- 映像が静止画/カメラのとき、配信・コメントタブではヘッダーを隠す。
-     接続状態と再接続だけは失わないよう、この1行をタブの中へ移して出す。 -->
-<div class="connrow" id="connRow" hidden>
-  <span class="conn-dot" id="connDot"></span>
-  <span class="conn-text" id="connText"></span>
-  <button class="conn-btn" id="connReconn" hidden>再接続</button>
-</div>
 
 <main id="app">
   <div class="stage">
@@ -1736,9 +1714,8 @@ function watchFirstVideo(canFallback){
   directWatch = st;
 }
 function setState(s, cls){
-  updateConnRow(s, cls);
   // 【表示を読み返さない】訳した表示と比べると判定が壊れるため、原文は lastState に持つ
-  lastState = s; lastStateCls = cls || "";
+  lastState = s;
   $("state").textContent = T(s); $("dot").className = "dot" + (cls? " "+cls : "");
   updateGuide(s, cls);
 }
@@ -2068,26 +2045,15 @@ $("kbdText").addEventListener("keydown", (e) => {
 // タブ切り替え(操作/設定)。選択はlocalStorageに保存。
 // ---- 上部の見せ方: タブと映像の方式で切り替える ----
 // 映像が静止画/カメラのとき、配信タブ・コメントタブではヘッダーと映像(リモート操作画面)を隠す。
-// **操作タブは対象外**(映像が無いと操作できない)。接続状態は connRow が受ける。
+// **操作タブは対象外**(映像が無いと操作できない)。
+// ヘッダーごと消すので、ステータス表示と再接続ボタンは**この2タブには出ない**(利用者の指示)。
 let currentTab = "operate";
-let lastStateCls = "";   // setState が受け取った状態クラス(1行の色に使う)
 function applyUpperLayout(){
   const srcEl = $("rsSource");
   const src = srcEl ? srcEl.value : "desktop";
   const compact = (currentTab === "restream" || currentTab === "comment") && src !== "desktop";
   document.body.classList.toggle("compact", compact);
 
-  const row = $("connRow");
-  if (row){
-    row.hidden = !compact;
-    if (compact){
-      const page = document.getElementById("tab-" + currentTab);
-      // 1行だけを現在のタブの先頭へ移す(2つのタブに複製しない)
-      if (page && row.parentElement !== page) page.insertBefore(row, page.firstChild);
-    }
-  }
-  // 1行の中身はヘッダーと同じ状態を映す。起動直後はまだ setState が来ていないことがあるので、ここでも入れる
-  updateConnRow(lastState || "disconnected", lastStateCls);
   const pv = $("cmPv");
   if (pv){
     pv.hidden = !(compact && currentTab === "comment");   // 出るのはコメントタブだけ
@@ -2097,17 +2063,6 @@ function applyUpperLayout(){
       if (v && v.play) requestAnimationFrame(() => { try { v.play().catch(() => {}); } catch(e){} });
     }
   }
-}
-// ヘッダーに代わる1行(点・状態・再接続)。ヘッダーと同じ内容を保つ。
-function updateConnRow(s, cls){
-  const dot = $("connDot"), txt = $("connText"), btn = $("connReconn");
-  if (!dot || !txt || !btn) return;
-  txt.textContent = T(s);
-  dot.className = "conn-dot" + (cls ? " " + cls : "");
-  // 再接続できる状態のときだけ出す(ヘッダーのボタンと同じ動きをさせる)
-  const usable = (s === "disconnected" || s === "" || s === "no server" || s === "認証拒否" || cls === "err");
-  btn.hidden = !usable;
-  btn.disabled = !usable;
 }
 
 function switchTab(name){
@@ -2600,8 +2555,6 @@ $("reconnBtn").onclick = () => {
   log("手動再接続");
   reconnect();
 };
-// ヘッダーを隠したときに出る1行の再接続は、ヘッダーのボタンへ**委譲**する(処理を二重に持たない)
-$("connReconn").onclick = () => { $("reconnBtn").click(); };
 
 // Start は接続を張り直してから配信開始する（Stop/Start繰り返しで音声が止まる問題の回避）。
 // コーデック切り替えと同じく、毎回新しいトラックで始めるためトラックの不連続が起きない。
@@ -5480,7 +5433,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.18";
+const CLIENT_VERSION = "v0.7.19";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
