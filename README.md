@@ -33,9 +33,9 @@ Windows PC の画面を、スマホや別の PC から見たり操作したり�
 | 用途 | URL |
 |---|---|
 | 外出先から操作する | https://brad-55.github.io/DesktopStream/client.html |
-| 再配信を見る(視聴専用) | https://brad-55.github.io/DesktopStream/secondclient.html |
+| 配信を見る(視聴専用) | https://brad-55.github.io/DesktopStream/secondclient.html |
 
-同じ Wi-Fi にいるときは、パソコン自身が配信する `https://パソコンのIP:8080` を開くこともできます(ルームID は要りません)。
+同じ Wi-Fi にいるときは、パソコン自身が提供する `https://パソコンのIP:8080` を開くこともできます(ルームID は要りません)。
 
 ---
 

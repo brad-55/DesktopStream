@@ -6,7 +6,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' fill='none' stroke='%232ecf8e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E %3Crect x='2' y='3' width='20' height='14' rx='2'/%3E %3Cpath d='M12 17v3M8 20h8'/%3E %3Cpath d='M4 4l7.07 17 2.51-7.39L21 11.06z' fill='%232ecf8e' stroke='none' transform='translate(6.8 3.8) scale(0.5)'/%3E %3C/svg%3E" />
 <title>Desktop Stream — 視聴</title>
 <style>
-  /* 再配信の視聴専用クライアント。
+  /* 配信の視聴専用クライアント。
      URLの ?room=<ベース32文字><部屋数+1の3桁> から部屋数を割り出し、
      001から順に空き部屋を探して入室する。 */
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -412,7 +412,7 @@ if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(doc
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.3";
+const CLIENT_VERSION = "v0.7.4";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;

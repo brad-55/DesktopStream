@@ -423,7 +423,7 @@
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
   }
 
-  /* ---------- 再配信 ---------- */
+  /* ---------- 配信 ---------- */
   #rsPreview { width: 160px; border-radius: var(--r-cell); background: #000; display: block; }
   #rsUrl { flex: 1; min-width: 160px; font-family: var(--mono); }
   #rsTitle, #rsPass, #bcText { flex: 1; min-width: 140px; }
@@ -674,7 +674,7 @@
        dvh を基準にしたレイアウトは「画面外に押し出された入力欄」を作ってしまう。
        どちらの環境でも正しいのは visualViewport の実測値だけなので、
        JS がそれを --vvh(実際に見えている高さ) と --kb(せり上がった量) に落としている。 */
-    /* 映像を縮める。再配信クライアントと同じ考え方だが、基準を dvh ではなく
+    /* 映像を縮める。配信クライアントと同じ考え方だが、基準を dvh ではなく
        実測値(--vvh)にしてある(dvh は環境によっては縮まないため)。
        文字入力中に限らず、キーボードが出ている間は常に縮めて場所を空ける。 */
     body.kbd-mode .stage, body.kb-up .stage { max-height: calc(var(--vvh, 100dvh) * .32); }
@@ -819,7 +819,7 @@
          拡大され、4倍のときポインタも4倍になって狙いが付けられない。
          外に出したぶん、位置は drawPtr() が手でズーム換算する。 -->
     <div id="vptr" class="sty-b"><svg width="22" height="30" viewBox="0 0 22 30"><path d="M1,1 L1,22 L6,17 L10,26 L13,25 L9,16 L16,16 Z"/></svg></div>
-    <div class="hint" id="hint">Start で配信開始</div>
+    <div class="hint" id="hint">Start でリモート操作開始</div>
     <div class="stage-ov">
       <button id="ovKbd" aria-label="文字入力の表示切り替え">⌨</button>
       <button id="ovMute" aria-pressed="false">🔇 音声<span class="sw">OFF</span></button>
@@ -844,7 +844,7 @@
     <div id="tabbar">
       <button class="tab-btn active" data-tab="operate">操作</button>
       <button class="tab-btn" data-tab="connect">接続</button>
-      <button class="tab-btn" data-tab="restream">再配信</button>
+      <button class="tab-btn" data-tab="restream">配信</button>
       <button class="tab-btn" data-tab="comment">コメント</button>
       <button class="tab-btn" data-tab="settings">設定</button>
     </div>
@@ -929,14 +929,14 @@
     </div>
 
     <!-- 設定タブ -->
-    <!-- 再配信タブ: 受信中の映像(またはカメラ/静止画)+マイクをAyame経由で複数視聴者へ再配信 -->
+    <!-- 配信タブ: 受信中の映像(またはカメラ/静止画)+マイクをAyame経由で複数視聴者へ配信 -->
     <div class="tabpage" id="tab-restream">
       <div class="controls primary-controls">
-        <button id="rsToggle">📡 再配信を開始</button>
+        <button id="rsToggle">📡 配信を開始</button>
         <button id="rsMic" disabled>🎙 マイクON</button>
         <button id="rsDeskAudio">🔊 PC音声OFF</button>
       </div>
-      <!-- 再配信に実際に使っている映像のミニプレビュー -->
+      <!-- 配信に実際に使っている映像のミニプレビュー -->
       <div class="controls" id="rsPreviewRow" style="display:none">
         <video id="rsPreview" autoplay playsinline muted></video>
         <span class="hintline">↑配信中の映像</span>
@@ -969,9 +969,9 @@
       </div>
       <div id="rsViewers"></div>
       <div class="fld">
-        <label for="rsUrl">視聴用URL(再配信中に有効)</label>
+        <label for="rsUrl">視聴用URL(配信中に有効)</label>
         <div class="controls">
-          <input id="rsUrl" type="text" readonly placeholder="再配信を開始すると表示されます" />
+          <input id="rsUrl" type="text" readonly placeholder="配信を開始すると表示されます" />
           <button id="rsCopy">コピー</button>
         </div>
         <div id="rsQr"></div>
@@ -980,13 +980,13 @@
         <label>視聴者履歴</label>
         <div id="rsRoster">まだ視聴者はいません</div>
       </div>
-      <span class="hintline">※マイクとカメラはHTTPSまたはlocalhostでのみ利用できます。「リモートデスクトップ」はプレーヤーで受信中の映像を再配信します。</span>
+      <span class="hintline">※マイクとカメラはHTTPSまたはlocalhostでのみ利用できます。「リモートデスクトップ」はプレーヤーで受信中の映像を配信します。</span>
     </div>
 
-    <!-- コメントタブ: 再配信の視聴者コメント一覧 -->
+    <!-- コメントタブ: 配信の視聴者コメント一覧 -->
     <div class="tabpage" id="tab-comment">
       <div class="fld">
-        <label>視聴者コメント(再配信)</label>
+        <label>視聴者コメント(配信)</label>
         <div class="controls">
           <input id="bcText" type="text" maxlength="200" placeholder="配信者としてコメント" />
           <button id="bcSend">送信</button>
@@ -1163,12 +1163,12 @@ const I18N_EN = {
   // ---- 上部・タブ ----
   "再接続": "Reconnect",
   "映像を再取得中…": "Reacquiring video…",
-  "Start で配信開始": "Press Start to begin streaming",
+  "Start でリモート操作開始": "Press Start to start remote control",
   "1×に戻す": "Reset to 1×",
   "接続していません": "Not connected",
   "操作": "Control",
   "接続": "Connect",
-  "再配信": "Restream",
+  "配信": "Stream",
   "コメント": "Comments",
   "設定": "Settings",
   "読込中…": "Loading…",
@@ -1232,14 +1232,14 @@ const I18N_EN = {
   "@ショートカット選択": "Choose a shortcut",
   "@ロック画面/ログイン画面で使います": "Use on the lock or sign-in screen",
   "@PCの画面をロックします(Win+L相当)": "Locks the PC (same as Win+L)",
-  // ---- 再配信タブ ----
-  "📡 再配信を開始": "📡 Start restream",
-  "⏹ 再配信を停止": "⏹ Stop restream",
+  // ---- 配信タブ ----
+  "📡 配信を開始": "📡 Start streaming",
+  "⏹ 配信を停止": "⏹ Stop streaming",
   "🎙 マイクON": "🎙 Mic ON",
   "🔇 ミュート中": "🔇 Mic muted",
   "🔊 PC音声OFF": "🔊 PC audio OFF",
   "🔊 PC音声ON": "🔊 PC audio ON",
-  "↑配信中の映像": "↑ Video being restreamed",
+  "↑配信中の映像": "↑ Video being streamed",
   "部屋数": "Rooms",
   "映像": "Video",
   "🖥 リモートデスクトップ": "🖥 Remote desktop",
@@ -1252,20 +1252,20 @@ const I18N_EN = {
   "視聴URLを再生成": "Regenerate viewer URL",
   "視聴者:": "Viewers:",
   "人": "",
-  "視聴用URL(再配信中に有効)": "Viewer URL (valid while restreaming)",
+  "視聴用URL(配信中に有効)": "Viewer URL (valid while streaming)",
   "コピー": "Copy",
   "視聴者履歴": "Viewer history",
   "まだ視聴者はいません": "No viewers yet",
-  "※マイクとカメラはHTTPSまたはlocalhostでのみ利用できます。「リモートデスクトップ」はプレーヤーで受信中の映像を再配信します。": "* The mic and camera work only over HTTPS or on localhost. \"Remote desktop\" restreams the video this player is receiving.",
-  "視聴者コメント(再配信)": "Viewer comments (restream)",
+  "※マイクとカメラはHTTPSまたはlocalhostでのみ利用できます。「リモートデスクトップ」はプレーヤーで受信中の映像を配信します。": "* The mic and camera work only over HTTPS or on localhost. \"Remote desktop\" restreams the video this player is receiving.",
+  "視聴者コメント(配信)": "Viewer comments (stream)",
   "@配信タイトル(任意)": "Stream title (optional)",
   "@未設定なら誰でも視聴可": "If empty, anyone can watch",
-  "@再配信を開始すると表示されます": "Shown after you start restreaming",
+  "@配信を開始すると表示されます": "Shown after you start streaming",
   "@配信者としてコメント": "Comment as the streamer",
   "切断": "Disconnect",
   "さんが入室しました": "joined",
   "さんが退室しました": "left",
-  "さんが退室しました(配信停止)": "left (restream stopped)",
+  "さんが退室しました(配信停止)": "left (stream stopped)",
   "名無し": "Anonymous",
   "ユーザー名未入力": "(no name yet)",
   "配信者": "Streamer",
@@ -1347,8 +1347,7 @@ const I18N_EN = {
   "接続できませんでした": "Could not connect",
   "接続できませんでした。サーバー側で承認が必要な場合があります": "Could not connect. The PC may need to approve this device.",
   "認証中…（初回はサーバーPCで承認してください）": "Authenticating… (the first time, approve this device on the PC)",
-  "「Start」で配信を開始できます": "Press \"Start\" to begin streaming",
-  "配信中": "Streaming",
+  "「Start」でリモート操作を開始できます": "Press \"Start\" to start remote control",
   "自動再接続中… ({0}回目)": "Auto-reconnecting… (attempt {0})",
   "AVズレ:映像+{0}ms": "A/V: video +{0}ms",
   "AVズレ:音声+{0}ms": "A/V: audio +{0}ms",
@@ -1597,8 +1596,8 @@ function updateGuide(s, cls){
   else if (s === "認証拒否" || cls === "err") { text = "接続できませんでした。サーバー側で承認が必要な場合があります"; tone = "err"; }
   else if (s === "connected") {
     if (!authed) { text = "認証中…（初回はサーバーPCで承認してください）"; tone = "warn"; }
-    else if ($("stop").disabled) { text = "「Start」で配信を開始できます"; tone = "ok"; }
-    else { text = "配信中"; tone = "ok"; }
+    else if ($("stop").disabled) { text = "「Start」でリモート操作を開始できます"; tone = "ok"; }
+    else { text = "リモート操作中"; tone = "ok"; }
   } else { text = s; tone = cls === "on" ? "ok" : ""; }
   g.textContent = T(text);
   g.className = tone;
@@ -1716,7 +1715,7 @@ async function setupPeer() {
       video.srcObject = e.streams[0];
       log("track:", e.track.kind);
     }
-    // 再配信中なら、新しい受信ストリーム/追加トラックから映像・PC音声を取り直す。
+    // 配信中なら、新しい受信ストリーム/追加トラックから映像・PC音声を取り直す。
     // 音声トラックが映像より遅れて届いてもdebounceで1回にまとまり、取りこぼさない。
     // (ontrackはネゴシエーション時にしか発火しないため、通常視聴中のコストはゼロ)
     rsScheduleReacquire("受信ストリーム更新");
@@ -2386,7 +2385,7 @@ async function logSelectedRoute(){
 // 配信中だった場合は再接続後に自動でStartし、startメッセージのmonitorで新モニタから開始する。
 $("monSel").addEventListener("change", () => {
   log("display -> " + $("monSel").selectedOptions[0].textContent + " / 再接続");
-  if (!$("stop").disabled) pendingStart = true; // 配信中なら再開まで自動で行う
+  if (!$("stop").disabled) pendingStart = true; // リモート操作中なら再開まで自動で行う
   reconnect();
 });
 
@@ -3353,7 +3352,7 @@ setInterval(pollStats, 2000);
 // --- 遅延(ラグ)対策: ラグ解消ボタン / リアルタイムモード ---
 // 原因がサーバー側(エンコーダ/キュー肥大)かクライアント側(ジッタバッファ肥大)か
 // 特定できていないため、両方をリセットする。WebRTC接続は維持するので、
-// 再接続と違い再配信の視聴者・録画・認証に影響しない。
+// 再接続と違い配信の視聴者・録画・認証に影響しない。
 let latencyMode = "smooth";
 let lastJitterMs = 0; // 直近の受信バッファ遅延(ランプの開始値に使う)
 
@@ -3597,9 +3596,9 @@ updateMouseUI(); // 初期表示
 updateRoomState();
 if (roomId) connect(); else log("「接続」タブの「ルームID入力」からルームIDを設定してください");
 
-// ================= 再配信(サブ配信) =================
+// ================= 配信(サブ配信) =================
 // 受信中のリモートデスクトップ映像(またはカメラ/静止画)にマイク音声を加えて、
-// Ayame経由で複数の視聴者へP2P再配信する。P2Pは1対1のため、視聴者ごとに
+// Ayame経由で複数の視聴者へP2P配信する。P2Pは1対1のため、視聴者ごとに
 // 別ルーム(ベースID32文字+連番3桁)を確保して待ち受ける。
 // 視聴用URLには「部屋数+1」の番号を付け、視聴側はそこから部屋数を割り出して
 // 001から順に空き部屋を探す。
@@ -3649,7 +3648,7 @@ function rsGenBase(n){
   return s;
 }
 function rsPad3(n){ return String(n).padStart(3, "0"); }
-function rsLog(...a){ log("[再配信]", ...a); }
+function rsLog(...a){ log("[配信]", ...a); }
 
 // ---- 映像ソースの取得(切替時は以前のソースを停止) ----
 async function rsGetVideoTrack(kind){
@@ -3672,7 +3671,7 @@ async function rsGetVideoTrack(kind){
     rsVideoRoute = "静止画";
     return rsCanvasStream.getVideoTracks()[0];
   }
-  // desktop: プレーヤーで受信中の映像を再配信する。取得手段は環境で異なるが、
+  // desktop: プレーヤーで受信中の映像を配信する。取得手段は環境で異なるが、
   // どちらも「その環境で確実に使える API」だけで選ぶ(UA では分けない)。
   //   1) HTMLMediaElement.captureStream がある
   //      → 従来どおり。実機実績のある経路なので変えない。
@@ -3738,10 +3737,10 @@ function rsStopSourceExtras(){
   if (rsCanvasStream){ rsCanvasStream.getTracks().forEach(t => t.stop()); rsCanvasStream = null; }
   if (rsCamStream){ rsCamStream.getTracks().forEach(t => t.stop()); rsCamStream = null; }
 }
-// 再配信の完全停止時。受信映像のキャプチャと canvas ブリッジの両方を手放す。
+// 配信の完全停止時。受信映像のキャプチャと canvas ブリッジの両方を手放す。
 // 中身は rsDropDesktopCapture と同じ(生きている受信トラックは止めない)なので、
 // 同じ処理を2か所に書かず、そちらへ委ねる。
-// 「再配信の停止」は利用者がプレーヤーの視聴を続ける操作である点に注意。
+// 「配信の停止」は利用者がプレーヤーの視聴を続ける操作である点に注意。
 function rsStopDesktopCapture(){
   rsDropDesktopCapture();
   rsBridgeTeardown(); // 完全停止時だけ橋を落とす(ソースの差し替えでは落とさない)
@@ -3797,7 +3796,7 @@ function rsBridgeEnsure(){
   if (!rsBridgeStream){
     if (!rsBridgeCanvas.captureStream){
       rsBridgeTeardown(); // 画面外に置いた canvas を DOM から外してから投げる
-      throw new Error("この端末は再配信の映像を作れません(captureStream非対応)");
+      throw new Error("この端末は配信の映像を作れません(captureStream非対応)");
     }
     // 引数なし = canvas が更新されたときだけ取得する。描画側で約15fpsに絞るので
     // レート制御は1箇所に集約される。captureStream(15) と二重に絞ると位相ズレで
@@ -3884,7 +3883,7 @@ function rsBridgeLoopStart(){
       }
       if (rsBridgeErrSince && now - rsBridgeErrSince > 2000){
         if (rsBridgeRAF){ cancelAnimationFrame(rsBridgeRAF); rsBridgeRAF = 0; }
-        rsLog("canvasブリッジの描画を停止しました(2秒間つづけて失敗。タブを切り替えるか再配信を開き直すと復帰します)");
+        rsLog("canvasブリッジの描画を停止しました(2秒間つづけて失敗。タブを切り替えるか配信を開き直すと復帰します)");
       }
     }
   };
@@ -3927,7 +3926,7 @@ async function rsSwitchSource(){
   } catch(e){ rsLog("ソース切替失敗:", e.message || e); }
 }
 
-// 再配信タブ内のミニプレビュー: 実際に送っている映像トラックをそのまま表示する
+// 配信タブ内のミニプレビュー: 実際に送っている映像トラックをそのまま表示する
 function rsUpdatePreview(){
   const pv = $("rsPreview"), row = $("rsPreviewRow");
   if (rsOn && rsVideoTrack){
@@ -3941,7 +3940,7 @@ function rsUpdatePreview(){
 }
 
 // ---- 映像ソースの再取得 ----
-// 再配信中にプレーヤーの受信ストリームが差し替わった(Start/再接続)とき、
+// 配信中にプレーヤーの受信ストリームが差し替わった(Start/再接続)とき、
 // またはバックグラウンドから復帰したときに呼ぶ。
 // video.captureStream()のキャッシュは元ストリームの差し替えで黒画面のまま
 // 固まることがあるため、捨てて取り直し、全視聴者のトラックを差し替える。
@@ -4370,13 +4369,13 @@ async function rsStart(){
   rsSlots = new Array(rooms);
   for (let i = 1; i <= rooms; i++) rsOpenSlot(i);
   rsShowShareUrl(); // 視聴用URL/QRを表示(開始前と同じ内容)
-  $("rsToggle").textContent = T("⏹ 再配信を停止");
+  $("rsToggle").textContent = T("⏹ 配信を停止");
   $("rsMic").disabled = !rsMicTrack;
   rsUpdateDeskAudioBtn();
   $("rsRooms").disabled = true;
   $("rsCap").textContent = rooms;
   rsLog("映像経路: " + (rsVideoRoute || "不明"));
-  rsLog(`再配信を開始しました (${rooms}部屋, 映像${RS_MAX_VIDEO_BPS/1000}kbps固定, H.265優先)`);
+  rsLog(`配信を開始しました (${rooms}部屋, 映像${RS_MAX_VIDEO_BPS/1000}kbps固定, H.265優先)`);
   rsAcquireWakeLock(); // 画面スリープで配信が止まるのを防ぐ
   rsUpdatePreview();
 }
@@ -4409,12 +4408,12 @@ function rsStop(){
   }
   rsSlots = [];
   rsStopMedia();
-  $("rsToggle").textContent = T("📡 再配信を開始");
+  $("rsToggle").textContent = T("📡 配信を開始");
   $("rsMic").disabled = true;
   $("rsRooms").disabled = false;
   rsShowShareUrl(); // 停止後も視聴用URLは見えるようにしておく
   $("rsCount").textContent = "0"; $("rsCap").textContent = "0";
-  rsLog("再配信を停止しました");
+  rsLog("配信を停止しました");
   rsUpdatePreview();
 }
 // 現在の設定(ベースID+部屋数)から視聴用URLとQRを表示する。開始前でも呼べる。
@@ -4743,7 +4742,7 @@ function applyPtrStyle(){
 })();
 $("ptrStyle").addEventListener("change", applyPtrStyle);
 
-// ================= セキュアデスクトップ検知 → 再配信の自動マスク =================
+// ================= セキュアデスクトップ検知 → 配信の自動マスク =================
 let rsSecure = false, rsMaskStream = null, rsMaskTimer = null;
 function rsOnSecure(on){
   rsSecure = !!on;
@@ -4815,9 +4814,9 @@ $("wolSend").onclick = () => {
 };
 
 
-// ================= 再配信: 配信の安定化と参加機能 =================
+// ================= 配信: 配信の安定化と参加機能 =================
 
-// Wake Lock: 再配信中の画面スリープを防ぐ。タブ復帰時に取り直す。
+// Wake Lock: 配信中の画面スリープを防ぐ。タブ復帰時に取り直す。
 let rsWakeLock = null;
 async function rsAcquireWakeLock(){
   try {
@@ -4900,7 +4899,7 @@ function rsSendAudioMap(slot){
 function bcSendComment(){
   const text = $("bcText").value.trim().slice(0, 200);
   if (!text) return;
-  if (!rsOn){ rsLog("再配信を開始してから送信してください"); return; }
+  if (!rsOn){ rsLog("配信を開始してから送信してください"); return; }
   const c = { name: T("配信者"), text, color: "#ffd479", icon: "", host: true, ts: Date.now() };
   rsAddComment(c, 0);
   rsPushHistory(c);
@@ -4927,14 +4926,14 @@ $("rsRegen").onclick = () => {
 };
 
 
-// ================= 再配信: PC音声トラック(マイクとは別送) =================
+// ================= 配信: PC音声トラック(マイクとは別送) =================
 // 【音質ポリシー】このプロジェクトの音声はオリジナル音質のまま処理する。
 // 加工(フィルター・ノイズ抑制・ゲイン変更等)を追加しないこと。
 // ここでのWeb Audioはトラックの取り出し(と後段のON/OFFゲイン)のみに使い、
 // 音を積極的に加工することはしない。
 // 受信中のデスクトップ音声(video.srcObjectの音声トラック)をWeb Audio経由で
 // 独立した送信トラックにする。マイクはミックスせず素のトラックのまま別送し、
-// 音量バランスは視聴側(再配信専用クライアント)の2本のスライダーで調整させる。
+// 音量バランスは視聴側(配信専用クライアント)の2本のスライダーで調整させる。
 // PC音声のON/OFFはゲインで即時に切り替える(再ネゴ不要)。
 function rsBuildAudioMix(){
   rsTeardownAudioMix();
@@ -5139,7 +5138,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.10";
+const CLIENT_VERSION = "v0.7.11";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -5180,7 +5179,7 @@ const CLIENT_VERSION = "v0.7.10";
   }
 
   // ---- 1. Audio Session の宣言 ----
-  // 通常は再生のみ。再配信でマイクを使っている間だけ録音も申告する。
+  // 通常は再生のみ。配信でマイクを使っている間だけ録音も申告する。
   function desiredType(){
     try { return rsMicTrack ? "play-and-record" : "playback"; } catch(e){ return "playback"; }
   }

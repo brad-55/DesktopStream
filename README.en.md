@@ -35,7 +35,7 @@ Details of each feature and troubleshooting are in the [User Guide](https://brad
 | Purpose | URL |
 |---|---|
 | Control from anywhere | https://brad-55.github.io/DesktopStream/client.html |
-| Watch a restream (view only) | https://brad-55.github.io/DesktopStream/secondclient.html |
+| Watch a stream (view only) | https://brad-55.github.io/DesktopStream/secondclient.html |
 
 On the same Wi-Fi, you can also open `https://PC-IP:8080`, served by the PC itself (no room ID needed).
 
