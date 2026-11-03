@@ -143,6 +143,41 @@
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
   #rightcol { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  /* 映像が静止画/カメラのとき、配信/コメントタブではヘッダーと映像を消して広く使う。
+     接続状態は connrow が受ける(ヘッダーの点・状態・再接続を失わないため)。 */
+  body.compact #hdr { display: none; }
+  body.compact #app { padding-top: calc(12px + env(safe-area-inset-top)); }
+  body.compact #app > .stage { display: none; }   /* 隠すだけ。トラックは止めない(操作タブへ戻った瞬間に使う) */
+  .connrow {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    padding: 4px 10px; min-height: 32px; border-radius: var(--r-cell);
+    background: var(--bg-2); border: .5px solid var(--separator);
+  }
+  .connrow[hidden] { display: none; }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; flex: none; }
+  .conn-dot.ok { background: #2ecf8e; }
+  .conn-dot.err { background: #ff5b5b; }
+  .conn-dot.warn { background: #e8a13a; }
+  .conn-text {
+    flex: 1; min-width: 0; font-size: var(--fs-body); color: var(--label-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .conn-btn { flex: none; min-height: 28px; padding: 3px 10px; font: inherit; }  /* 文字サイズは継承(型スケールを増やさない) */
+  /* 配信プレビュー: 16:9 を保ち、縦横どちらでも画面を突き抜けないよう両軸に上限を置く */
+  .pv {
+    position: relative; width: 100%; aspect-ratio: 16/9; flex: none;
+    max-height: 38vh; max-height: 38dvh;
+    max-width: calc(38vh * 16 / 9);
+    margin-inline: auto; background: #000; border-radius: 12px; overflow: hidden;
+  }
+  .pv[hidden] { display: none; }
+  .pv video { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .pv-empty {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--label-3); font-size: var(--fs-body);
+  }
+  .pv-empty[hidden] { display: none; }
+
 
   /* ---------- 映像 ---------- */
   .stage {
@@ -288,14 +323,18 @@
   }
   /* 状態ガイドはタブに依存せず常時見える(なぜ Start が押せないかが分かる)。
      Start/Stop は**操作タブの中**に移した。ここでは状態だけを1行で持つ。 */
-  #statusrow { display: flex; gap: 6px; align-items: stretch; }
+  /* 状態 + Start/Stop の1行。操作タブの先頭にだけ置く。 */
+  #statusrow { display: flex; gap: 6px; align-items: stretch; flex: none; }
   #statusrow #guide {
     flex: 1 1 0; min-width: 0; padding: 4px 10px;
     display: flex; align-items: center;
+    /* 1行に収める。折り返すと行の高さが伸びて Start/Stop が縦に膨らむ。
+       長い文は省略記号で切る(全文は title で読める) */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   /* 操作タブの先頭に置く Start/Stop。2個で行をちょうど二分する。
      【注意】薄くするのは余白だけ。ボタンの厚み(32px)は変えない。 */
-  #startstop { flex: 1 1 auto; gap: 6px; }
+  #startstop { flex: 1 1 auto; min-width: 0; gap: 6px; flex-wrap: nowrap; }
   #startstop button {
     flex: 1 0 auto; min-height: 32px; /* 厚みは操作タブの基準(32px)と同じ */
     max-width: calc(50% - 3px);       /* 2個で行をちょうど二分する */
@@ -868,12 +907,19 @@
 </style>
 </head>
 <body>
-<header>
+<header id="hdr">
   <span id="dot" class="dot"></span>
   <h1>DESKTOP STREAM</h1>
   <span id="state" aria-live="polite">disconnected</span>
   <button id="reconnBtn" class="hdr-btn">再接続</button>
 </header>
+<!-- 映像が静止画/カメラのとき、配信・コメントタブではヘッダーを隠す。
+     接続状態と再接続だけは失わないよう、この1行をタブの中へ移して出す。 -->
+<div class="connrow" id="connRow" hidden>
+  <span class="conn-dot" id="connDot"></span>
+  <span class="conn-text" id="connText"></span>
+  <button class="conn-btn" id="connReconn" hidden>再接続</button>
+</div>
 
 <main id="app">
   <div class="stage">
@@ -896,13 +942,6 @@
   </div>
 
   <div id="rightcol">
-    <!-- 状態ガイド: タブに依存せず常時見える位置に置く。
-         Start/Stop は**操作タブの中**へ移した(利用者の指示)。
-         他のタブでは出さない。状態だけは、なぜ Start が押せないのかが分かるよう
-         タブに関係なく出したままにする。 -->
-    <div id="statusrow">
-      <div id="guide" role="status" aria-live="polite">接続していません</div>
-    </div>
     <!-- タブバー -->
     <div id="tabbar">
       <button class="tab-btn active" data-tab="operate">操作</button>
@@ -914,10 +953,14 @@
 
     <!-- 操作タブ -->
     <div class="tabpage active" id="tab-operate">
-      <!-- Start/Stop は操作タブだけに置く。2個で行をちょうど二分する。 -->
-      <div class="controls" id="startstop">
-        <button id="start" class="primary" disabled>Start</button>
-        <button id="stop" class="danger" disabled>Stop</button>
+      <!-- 状態表示と Start/Stop は**1行**。行なので状態も含む(利用者の指摘)。
+           左が状態、右が Start/Stop。右半分を2個で二分する。 -->
+      <div id="statusrow">
+        <div id="guide" role="status" aria-live="polite">接続していません</div>
+        <div class="controls" id="startstop">
+          <button id="start" class="primary" disabled>Start</button>
+          <button id="stop" class="danger" disabled>Stop</button>
+        </div>
       </div>
       <div class="controls primary-controls">
         <button id="unmute" title="音声OFF" aria-pressed="false"><span class="bs">音OFF</span><span class="bl">🔇 音声</span><span class="sw">OFF</span></button>
@@ -1041,7 +1084,7 @@
         <summary>配信の設定</summary>
         <div class="rsc-body">
           <div class="controls">
-            <span class="fld-inline"><label for="rsRooms">部屋数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
+            <span class="fld-inline"><label for="rsRooms">視聴者数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
             <span class="fld-inline"><label for="rsSource">映像</label><select id="rsSource">
               <option value="image">🖼 静止画</option>
               <option value="desktop" selected>🖥 リモートデスクトップ</option>
@@ -1063,7 +1106,7 @@
             <span class="fld-inline"><label for="rsPass">合言葉</label><input id="rsPass" type="text" maxlength="20" placeholder="未設定なら誰でも視聴可" /></span>
           </div>
           <button id="rsRegen">視聴URLを再生成</button>
-          <span class="hintline">部屋数は配信中に変えられません(停止してから変更)</span>
+          <span class="hintline">視聴者数は配信中に変えられません(停止してから変更)</span>
         </div>
       </details>
 
@@ -1079,6 +1122,12 @@
 
     <!-- コメントタブ: 配信の視聴者コメント一覧 -->
     <div class="tabpage" id="tab-comment">
+      <!-- 配信プレビュー: 映像が静止画/カメラのときだけ出す(ヘッダーも映像も消えるため)。
+           枠は 16:9 固定。未配信でも同じ高さで、中に文言を出す(video の子は描画されないので重ねる)。 -->
+      <div class="pv" id="cmPv" hidden>
+        <video id="rsPreviewC" autoplay muted playsinline></video>
+        <div class="pv-empty" id="cmPvEmpty">まだ配信していません</div>
+      </div>
       <div class="fld">
         <label>視聴者コメント(配信)</label>
         <div class="controls">
@@ -1330,6 +1379,9 @@ const I18N_EN = {
   // ---- 配信タブ ----
   "📡 配信を開始": "📡 Start streaming",
   "配信中": "Streaming",
+  "開始できません": "Could not start",
+  "静止画": "Still image",
+  "カメラ": "Camera",
   "停止中": "Stopped",
   "見せたい人に配る": "Share with others",
   "いま見ている人": "Watching now",
@@ -1337,7 +1389,7 @@ const I18N_EN = {
   "視聴者": "Viewers",
   "まだ誰も見ていません": "No one is watching yet",
   "QRを読み取ってもらうと、そのまま開けます": "They can scan the QR code to open it",
-  "部屋数は配信中に変えられません(停止してから変更)": "Room count cannot be changed while streaming",
+  "視聴者数は配信中に変えられません(停止してから変更)": "The viewer count cannot be changed while streaming",
   "PCに接続していません": "Not connected to the PC",
   "接続すると自動で映像が届きます": "Video arrives automatically once connected",
   "⏹ 配信を停止": "⏹ Stop streaming",
@@ -1346,7 +1398,7 @@ const I18N_EN = {
   "🔊 PC音声OFF": "🔊 PC audio OFF",
   "🔊 PC音声ON": "🔊 PC audio ON",
   "↑配信中の映像": "↑ Video being streamed",
-  "部屋数": "Rooms",
+  "視聴者数": "Viewers",
   "映像": "Video",
   "🖥 リモートデスクトップ": "🖥 Remote desktop",
   "📷 カメラ": "📷 Camera",
@@ -1684,8 +1736,9 @@ function watchFirstVideo(canFallback){
   directWatch = st;
 }
 function setState(s, cls){
+  updateConnRow(s, cls);
   // 【表示を読み返さない】訳した表示と比べると判定が壊れるため、原文は lastState に持つ
-  lastState = s;
+  lastState = s; lastStateCls = cls || "";
   $("state").textContent = T(s); $("dot").className = "dot" + (cls? " "+cls : "");
   updateGuide(s, cls);
 }
@@ -2013,16 +2066,63 @@ $("kbdText").addEventListener("keydown", (e) => {
 })();
 
 // タブ切り替え(操作/設定)。選択はlocalStorageに保存。
+// ---- 上部の見せ方: タブと映像の方式で切り替える ----
+// 映像が静止画/カメラのとき、配信タブ・コメントタブではヘッダーと映像(リモート操作画面)を隠す。
+// **操作タブは対象外**(映像が無いと操作できない)。接続状態は connRow が受ける。
+let currentTab = "operate";
+let lastStateCls = "";   // setState が受け取った状態クラス(1行の色に使う)
+function applyUpperLayout(){
+  const srcEl = $("rsSource");
+  const src = srcEl ? srcEl.value : "desktop";
+  const compact = (currentTab === "restream" || currentTab === "comment") && src !== "desktop";
+  document.body.classList.toggle("compact", compact);
+
+  const row = $("connRow");
+  if (row){
+    row.hidden = !compact;
+    if (compact){
+      const page = document.getElementById("tab-" + currentTab);
+      // 1行だけを現在のタブの先頭へ移す(2つのタブに複製しない)
+      if (page && row.parentElement !== page) page.insertBefore(row, page.firstChild);
+    }
+  }
+  // 1行の中身はヘッダーと同じ状態を映す。起動直後はまだ setState が来ていないことがあるので、ここでも入れる
+  updateConnRow(lastState || "disconnected", lastStateCls);
+  const pv = $("cmPv");
+  if (pv){
+    pv.hidden = !(compact && currentTab === "comment");   // 出るのはコメントタブだけ
+    if (compact){
+      const v = $("rsPreviewC");
+      // display:none の間に貼った srcObject は再生が始まらないことがあるので、出した時点で play し直す
+      if (v && v.play) requestAnimationFrame(() => { try { v.play().catch(() => {}); } catch(e){} });
+    }
+  }
+}
+// ヘッダーに代わる1行(点・状態・再接続)。ヘッダーと同じ内容を保つ。
+function updateConnRow(s, cls){
+  const dot = $("connDot"), txt = $("connText"), btn = $("connReconn");
+  if (!dot || !txt || !btn) return;
+  txt.textContent = T(s);
+  dot.className = "conn-dot" + (cls ? " " + cls : "");
+  // 再接続できる状態のときだけ出す(ヘッダーのボタンと同じ動きをさせる)
+  const usable = (s === "disconnected" || s === "" || s === "no server" || s === "認証拒否" || cls === "err");
+  btn.hidden = !usable;
+  btn.disabled = !usable;
+}
+
 function switchTab(name){
+  currentTab = name;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tabpage").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
   localStorage.setItem("dss_tab", name);
+  applyUpperLayout();
 }
 document.querySelectorAll(".tab-btn").forEach(b => {
   b.addEventListener("click", () => switchTab(b.dataset.tab));
 });
 (function(){
   const saved = localStorage.getItem("dss_tab") || "operate";
+  // 起動時も switchTab を通す(ここで applyUpperLayout も走る)
   switchTab(saved);
 })();
 
@@ -2500,6 +2600,8 @@ $("reconnBtn").onclick = () => {
   log("手動再接続");
   reconnect();
 };
+// ヘッダーを隠したときに出る1行の再接続は、ヘッダーのボタンへ**委譲**する(処理を二重に持たない)
+$("connReconn").onclick = () => { $("reconnBtn").click(); };
 
 // Start は接続を張り直してから配信開始する（Stop/Start繰り返しで音声が止まる問題の回避）。
 // コーデック切り替えと同じく、毎回新しいトラックで始めるためトラックの不連続が起きない。
@@ -4105,14 +4207,16 @@ async function rsSwitchSource(){
 // 配信タブ内のミニプレビュー: 実際に送っている映像トラックをそのまま表示する
 function rsUpdatePreview(){
   const pv = $("rsPreview"), row = $("rsPreviewRow");
-  if (rsOn && rsVideoTrack){
-    try { pv.srcObject = new MediaStream([rsVideoTrack]); } catch(e){}
-    row.style.display = "";
-    if (pv.play) pv.play().catch(() => {});
-  } else {
-    pv.srcObject = null;
-    row.style.display = "none";
+  const pv2 = $("rsPreviewC"), empty = $("cmPvEmpty");
+  const live = !!(rsOn && rsVideoTrack);
+  // 同じトラックを2つの video に貼る。止めるときは**両方**外す(片方だけだと黒画面が残る)
+  for (const v of [pv, pv2]){
+    if (!v) continue;
+    try { v.srcObject = live ? new MediaStream([rsVideoTrack]) : null; } catch(e){}
+    if (live && v.play) v.play().catch(() => {});
   }
+  if (row) row.style.display = live ? "" : "none";
+  if (empty) empty.hidden = live;
 }
 
 // ---- 映像ソースの再取得 ----
@@ -4161,7 +4265,10 @@ async function rsReacquireVideo(reason){
       }
     }
     // 復帰時にAudioContextが停止したままだとPC音声が無音になるため再開する
-    if (rsAudioCtx && rsAudioCtx.state === "suspended"){ try { rsAudioCtx.resume(); } catch(e){} }
+    if (rsAudioCtx && rsAudioCtx.state === "suspended"){
+    // resume() は Promise を返す。同期の try だけでは非同期の拒否を捕まえられない
+    try { const p = rsAudioCtx.resume(); if (p && p.catch) p.catch(() => {}); } catch(e){}
+  }
     rsConnectDeskAudio(); // PC音声も新しい受信ストリームの音声トラックへ繋ぎ直す
     rsUpdatePreview();
     rsLog("映像ソースを再取得しました(" + (reason || "") + ")");
@@ -4543,20 +4650,40 @@ async function rsStart(){
   const rooms = Math.max(1, Math.min(50, parseInt($("rsRooms").value, 10) || 10));
   $("rsRooms").value = rooms;
   // マイク(secure contextでのみ利用可能)
-  await rsAcquireMic();
+  // 【注意】拒否・失敗しても配信は続けられる(映像だけ配る)。例外で抜けると
+  // 中途半端な状態で止まるので、ここで握って理由を履歴に出す。
+  try { await rsAcquireMic(); }
+  catch(e){ rsLog("マイクを使えません(映像のみで配信します):", e.message || e); }
   // PC音声をWeb Audio経由で独立トラック化する(マイクとはミックスせず別トラックで送る)
-  rsBuildAudioMix();
+  // 【注意】ここで投げると rsOn=false のまま中途半端に止まる(マイクだけ取得済み・状態は無更新)。
+  // マイクと同じく握って、映像だけでも配信を続けられるようにする。
+  try { rsBuildAudioMix(); }
+  catch(e){ rsLog("PC音声を用意できません(映像のみで配信します):", e.message || e); }
   // 自動再生ポリシーで AudioContext が suspended のまま始まることがある。押下の
   // この時点で起こしておく(以後の resume は復帰処理側でも行う)。
-  if (rsAudioCtx && rsAudioCtx.state === "suspended"){ try { rsAudioCtx.resume(); } catch(e){} }
+  if (rsAudioCtx && rsAudioCtx.state === "suspended"){
+    // resume() は Promise を返す。同期の try だけでは非同期の拒否を捕まえられない
+    try { const p = rsAudioCtx.resume(); if (p && p.catch) p.catch(() => {}); } catch(e){}
+  }
   try { rsVideoTrack = await rsGetVideoTrack($("rsSource").value); }
-  catch(e){ rsLog("開始できません:", e.message || e); rsStopMedia(); return; }
+  catch(e){
+    // 履歴を畳んだままにすると「押したのに何も起きない」に見える。
+    // 状態そのものに理由を出し、履歴も開く。
+    const msg = (e && e.message) ? e.message : String(e);
+    rsLog("開始できません:", msg);
+    $("rsState").textContent = T("開始できません") + ": " + msg;
+    $("rsState").title = msg;   // 状態は1行で切れるので、全文は title で読めるようにする
+    $("rsDot").classList.remove("on");
+    if ($("rsHistWrap")) $("rsHistWrap").open = true;
+    rsStopMedia();
+    return;
+  }
   rsOn = true;
   rsSlots = new Array(rooms);
   for (let i = 1; i <= rooms; i++) rsOpenSlot(i);
   rsShowShareUrl(); // 視聴用URL/QRを表示(開始前と同じ内容)
   $("rsToggle").textContent = T("⏹ 配信を停止");
-  $("rsState").textContent = T("配信中");
+  rsShowState();
   $("rsDot").classList.add("on");
   if ($("rsSetWrap")) $("rsSetWrap").open = false; // 配信中は設定を畳む(誤タッチを減らす)
   $("rsMic").disabled = !rsMicTrack;
@@ -4568,6 +4695,15 @@ async function rsStart(){
   rsLog(`配信を開始しました (${rooms}部屋, 映像${RS_MAX_VIDEO_BPS/1000}kbps固定, H.265優先)`);
   rsAcquireWakeLock(); // 画面スリープで配信が止まるのを防ぐ
   rsUpdatePreview();
+}
+// 状態の見出し。「配信中 · 静止画」のように**何を配っているか**まで出す。
+// 受信映像のときは「配信中」だけ(従来どおり)。配信中の切替にも追随させる。
+function rsShowState(){
+  const el = $("rsState"); if (!el) return;
+  const kind = $("rsSource") ? $("rsSource").value : "desktop";
+  const label = kind === "image" ? "静止画" : kind === "camera" ? "カメラ" : "";
+  el.textContent = T("配信中") + (label ? " · " + T(label) : "");
+  el.removeAttribute("title");   // 前回の失敗理由が残らないよう消す
 }
 function rsStopMedia(){
   rsClearMask();
@@ -4633,6 +4769,10 @@ $("rsMic").onclick = () => {
   rsSetToggle($("rsMic"), !rsMuted);
 };
 $("rsRooms").addEventListener("input", () => { if (!rsOn) rsShowShareUrl(); });
+$("rsSource").addEventListener("change", () => {
+  applyUpperLayout();
+  if (rsOn) rsShowState();   // 配信中の切替に状態表示を追随させる(表示が嘘にならないように)
+});
 $("rsSource").addEventListener("change", rsSwitchSource);
 $("rsImageFile").addEventListener("change", (e) => {
   const f = e.target.files && e.target.files[0];
@@ -5340,7 +5480,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.15";
+const CLIENT_VERSION = "v0.7.17";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
