@@ -273,19 +273,19 @@
     background: var(--bg-2); color: var(--label-2);
     font-size: var(--fs-body); border: .5px solid var(--separator);
   }
-  /* 状態表示と Start/Stop を1行に。左半分が状態、右半分が操作。
-     ここで横幅を分け合うことで、下のボタン行が4個ずつになり、
-     どの行も完全な文言のまま1行に収まるようになる。
-     【注意】薄くするのは**この行の余白だけ**。ボタンの厚み(32px)は変えない。 */
+  /* 状態ガイドはタブに依存せず常時見える(なぜ Start が押せないかが分かる)。
+     Start/Stop は**操作タブの中**に移した。ここでは状態だけを1行で持つ。 */
   #statusrow { display: flex; gap: 6px; align-items: stretch; }
   #statusrow #guide {
     flex: 1 1 0; min-width: 0; padding: 4px 10px;
     display: flex; align-items: center;
   }
-  #statusrow #startstop { flex: 1 1 0; gap: 6px; }
-  #statusrow #startstop button {
-    flex: 1 0 auto; min-height: 32px; padding: 4px 5px;
-    max-width: calc(50% - 3px); /* 2個で行をちょうど二分する */
+  /* 操作タブの先頭に置く Start/Stop。2個で行をちょうど二分する。
+     【注意】薄くするのは余白だけ。ボタンの厚み(32px)は変えない。 */
+  #startstop { flex: 1 1 auto; gap: 6px; }
+  #startstop button {
+    flex: 1 0 auto; min-height: 32px; /* 厚みは操作タブの基準(32px)と同じ */
+    max-width: calc(50% - 3px);       /* 2個で行をちょうど二分する */
   }
 
   /* ---------- タブバー(下部に浮かぶカプセル) ---------- */
@@ -830,20 +830,17 @@
   </div>
 
   <div id="rightcol">
-    <!-- 状態ガイド: タブに依存せず常時見える位置に置く -->
-    <!-- 状態表示と Start/Stop を1行に並べる。左半分が状態、右半分が操作。
-         Start/Stop はどのタブからでも押せた方が都合がよいので、タブの外に置く。 -->
+    <!-- 状態ガイド: タブに依存せず常時見える位置に置く。
+         Start/Stop は**操作タブの中**へ移した(利用者の指示)。
+         他のタブでは出さない。状態だけは、なぜ Start が押せないのかが分かるよう
+         タブに関係なく出したままにする。 -->
     <div id="statusrow">
       <div id="guide" role="status" aria-live="polite">接続していません</div>
-      <div class="controls" id="startstop">
-        <button id="start" class="primary" disabled>Start</button>
-        <button id="stop" class="danger" disabled>Stop</button>
-      </div>
     </div>
     <!-- タブバー -->
     <div id="tabbar">
       <button class="tab-btn active" data-tab="operate">操作</button>
-      <button class="tab-btn" data-tab="connect">接続</button>
+      <button class="tab-btn" data-tab="connect">接続状態</button>
       <button class="tab-btn" data-tab="restream">配信</button>
       <button class="tab-btn" data-tab="comment">コメント</button>
       <button class="tab-btn" data-tab="settings">設定</button>
@@ -851,6 +848,11 @@
 
     <!-- 操作タブ -->
     <div class="tabpage active" id="tab-operate">
+      <!-- Start/Stop は操作タブだけに置く。2個で行をちょうど二分する。 -->
+      <div class="controls" id="startstop">
+        <button id="start" class="primary" disabled>Start</button>
+        <button id="stop" class="danger" disabled>Stop</button>
+      </div>
       <div class="controls primary-controls">
         <button id="unmute" title="音声OFF" aria-pressed="false"><span class="bs">音OFF</span><span class="bl">🔇 音声</span><span class="sw">OFF</span></button>
         <button id="fsBtn" title="全画面"><span class="bs">全画面</span><span class="bl">⛶ 全画面</span></button>
@@ -1168,6 +1170,7 @@ const I18N_EN = {
   "接続していません": "Not connected",
   "操作": "Control",
   "接続": "Connect",
+  "接続状態": "Connection",
   "配信": "Stream",
   "コメント": "Comments",
   "設定": "Settings",
@@ -5215,7 +5218,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.13";
+const CLIENT_VERSION = "v0.7.14";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
