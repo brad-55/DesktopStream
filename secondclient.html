@@ -55,9 +55,16 @@
     padding: 10px;
     padding-left: calc(10px + env(safe-area-inset-left));
     padding-right: calc(10px + env(safe-area-inset-right));
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    /* OSキーボードが出ている間は、その高さのぶんだけ下を空けて入力欄を持ち上げる。
+       interactive-widget=resizes-content を解釈しない環境(iOS Safari)では
+       レイアウトが縮まず、キーボードが入力欄に覆いかぶさるため実測が要る。 */
+    /* キーボードが出ている間も env(safe-area-inset-bottom) は 0 にならない環境がある。
+       足すと入力欄がキーボードから浮くので、**大きい方**を採る。 */
+    padding-bottom: calc(10px + max(var(--kb, 0px), env(safe-area-inset-bottom, 0px)));
   }
   /* 映像は独立した1つの面として置く(上に何も重ねない) */
+  /* 映像とタイトルをまとめる器。縦画面では縦積み、横画面では左の列になる。 */
+  #stagewrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: none; }
   .stage {
     position: relative; flex: none; width: 100%; aspect-ratio: 16/9;
     background: #000; border-radius: 14px; overflow: hidden;
@@ -94,7 +101,7 @@
     align-items: center; justify-content: center;
   }
   /* JSで display を "" にすると下記のflexが効く */
-  #soundOnly:not([style*="none"]) { display: flex; }
+  #soundOnly.on { display: flex; }
   #ovMsg {
     position: absolute; left: 0; right: 0; top: 38%; text-align: center;
     color: #8a93a0; font-size: 13px; padding: 0 16px; pointer-events: none;
@@ -104,14 +111,17 @@
   #cmWrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
   #comments {
     flex: 1; min-height: 0; overflow: auto; padding: 12px 14px;
+    /* 上に足したときの位置補正は addComment 側で行う。ブラウザの自動補正と二重にならないよう切る */
+    overflow-anchor: none;
     background: #10141a; border: 1px solid #1c222a; border-radius: 14px;
     display: flex; flex-direction: column; gap: 8px;
     scrollbar-width: thin;
   }
-  .cm { font-size: 13.5px; line-height: 1.5; word-break: break-word; color: #e6e8ea; }
+  .cm { font-size: 13.5px; line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; color: #e6e8ea; }
   .cm .meta { color: #8b96a3; margin-right: 6px; font-size: 11px; }
+  /* 幅が足りないときは折り返す(名前/色/アイコンで埋まって本文が潰れるのを防ぐ) */
   #cmForm {
-    display: flex; align-items: center; gap: 6px; flex: none;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none;
     background: #10141a; border: 1px solid #1c222a; border-radius: 14px; padding: 6px;
   }
   /* P2Pが通らない回線の警告。既定は非表示で、検出したときだけ出す。 */
@@ -129,7 +139,7 @@
     padding: 8px 10px; border-radius: 999px; font: inherit; font-size: 16px; min-width: 0;
   }
   #cmText {
-    flex: 1; min-width: 0; background: #0b0e12; border: 1px solid #2a323b; color: #e6e8ea;
+    flex: 1 1 120px; min-width: 0; background: #0b0e12; border: 1px solid #2a323b; color: #e6e8ea;
     padding: 8px 12px; border-radius: 999px; font: inherit; font-size: 16px;
   }
   #cmName::placeholder, #cmText::placeholder { color: #6b7684; }
@@ -150,29 +160,43 @@
   /* 横画面: プレーヤー左、コメント右 */
   @media (orientation: landscape) and (min-width: 600px) {
     #app { flex-direction: row; }
-    .stage { flex: 0 1 auto; width: auto; height: 100%; max-height: 100%; max-width: 62%; }
-    #cmWrap { flex: 1 1 300px; min-width: 260px; }
+    /* 高さを基準に 16:9 を決める(幅を伸ばすと黒帯だけが広がる) */
+    /* 幅を**決め打ち**にする。max-width だけだと中身の幅が定まらず、映像が小さく潰れる */
+    #stagewrap { flex: 0 1 62%; max-width: 62%; height: 100%; max-height: 100%; min-height: 0; align-items: flex-start; justify-content: center; }
+    /* 幅を基準に 16:9 にする。高さ基準だと器の高さに引き伸ばされて比が崩れる */
+    .stage { flex: none; width: 100%; height: auto; min-height: 0; }
+    #bTitle { align-self: stretch; max-width: 100%; }
+    /* 62% + 260px だと 684px 未満の横画面ではみ出す。下限を下げて収める */
+  #cmWrap { flex: 1 1 300px; min-width: 200px; }
   }
-  /* 音量と全画面: 映像の下の細い帯。2行2列(左=スライダー / 右=ボタン)で揃える */
+  /* 音量と全画面: 映像の下端に**小さく**重ねる。
+     コメントは重ねない(利用者の指示: オーバーレイ禁止はコメントのこと)。
+     操作の帯だけは全画面でも使えるよう、映像の中に置く。 */
   #vrow {
-    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px 10px;
-    flex: none; background: #10141a; border: 1px solid #1c222a; border-radius: 14px; padding: 8px 12px;
+    position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 6;
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px;
+    padding: 6px 10px; border-radius: 12px;
+    background: rgba(13,17,22,.74); border: 1px solid rgba(255,255,255,.14);
   }
   #vrow .volgrp { grid-column: 1; }
-  #vrow .volgrp:nth-of-type(1) { grid-row: 1; }
-  #vrow .volgrp:nth-of-type(2) { grid-row: 2; }
-  #vrow #unmute { grid-column: 2; grid-row: 1; }
-  #vrow #fsBtn { grid-column: 2; grid-row: 2; }
-  #vrow #fsBtn, #vrow #unmute {
-    flex: none; min-height: 36px; padding: 6px 12px; font: inherit; font-size: 13px;
-    background: #161b21; color: #e6e8ea; border: 1px solid #2a323b; border-radius: 6px;
+  #vrow .vlabel { font-size: 10px; }
+  /* 帯の中のボタンは小さく。**同じセレクタを2か所に書かない**(後勝ちで寸法が戻る) */
+  #vrow #unmute, #vrow #fsBtn {
+    grid-column: 2;
+    flex: none; min-height: 28px; padding: 3px 8px; font: inherit; font-size: 11px;
+    background: #161b21; color: #e6e8ea; border: 1px solid #2a323b; border-radius: 8px;
     cursor: pointer; touch-action: manipulation; white-space: nowrap;
   }
+  #vrow .volgrp:nth-of-type(1) { grid-row: 1; }
+  #vrow .volgrp:nth-of-type(2) { grid-row: 2; }
+  #vrow #unmute { grid-row: 1; }
+  #vrow #fsBtn { grid-row: 2; }
   /* 音量バランス: 動画音声(PC音声)と配信者マイクの2本 */
   .volgrp { display: flex; align-items: center; gap: 5px; min-width: 0; }
   .volgrp .vlabel { font-size: 11px; color: #9aa4b0; flex: none; }
   .volgrp input[type="range"] { flex: 1; min-width: 0; accent-color: #2ecf8e; }
-  /* 配信タイトル: 映像の**下**に1行で置く(映像に重ねない)。映像をタップで表示/非表示。 */
+  /* 配信タイトル: 映像の**下**に1行で置く(映像に重ねない)。映像をタップで表示/非表示。
+     .stage と #bTitle は同じ器の中の隣り合う兄弟なので、+ で効く。 */
   #bTitle {
     flex: none; padding: 0 2px;
     font-size: 13px; font-weight: 700; color: #e8edf2;
@@ -187,8 +211,21 @@
     background: rgba(13,17,22,.72); border: 1px solid rgba(58,68,80,.85); border-radius: 6px;
     cursor: pointer; touch-action: manipulation;
   }
+  /* 全画面では縦画面用の高さ制限(42dvh)や角丸を外す。外さないと全画面が画面の42%で潰れる。
+     【注意】ベンダープレフィックス付きは同じセレクタリストに書かない(解釈できない1つで規則ごと捨てられる)。 */
+  .stage:fullscreen {
+    max-height: none; width: 100%; height: 100%;
+    border-radius: 0; border: none; aspect-ratio: auto;
+  }
+  .stage:-webkit-full-screen {
+    max-height: none; width: 100%; height: 100%;
+    border-radius: 0; border: none; aspect-ratio: auto;
+  }
   .stage:fullscreen #fsExit { display: block; }
   .stage:-webkit-full-screen #fsExit { display: block; }
+  /* 全画面中は「全画面にする」ボタンは不要(右上の解除ボタンと重複する) */
+  .stage:fullscreen #fsBtn { display: none; }
+  .stage:-webkit-full-screen #fsBtn { display: none; }
   /* コメントのアバター(画像 or 頭文字の丸) */
   .cm-av {
     width: 20px; height: 20px; border-radius: 50%; flex: none;
@@ -264,24 +301,30 @@
 </div>
 
 <div id="app">
+  <div id="stagewrap">
   <div class="stage">
     <video id="player" autoplay playsinline muted></video>
     <div id="ovMsg">配信を探しています…</div>
     <div id="soundOnly">♪ Sound Only</div>
     <button id="fsExit" aria-label="全画面を終了">✕ 全画面を終了</button>
     <button id="retry">↻ もう一度さがす</button>
-  </div>
-  <!-- 配信タイトルは**映像に重ねない**。映像のすぐ下に1行で置く(視聴画面はオーバーレイ禁止)。 -->
-  <div id="bTitle"></div>
-  <div id="cmWrap">
-    <!-- P2Pが通らない回線を検出したときだけ出る。既定は非表示。 -->
-    <div id="netWarn" style="display:none"></div>
+    <!-- 操作の帯は映像の中に小さく重ねる(全画面でも使えるように)。コメントは重ねない。 -->
     <div id="vrow">
       <span class="volgrp"><span class="vlabel">🎬動画</span><input id="volDesk" type="range" min="0" max="100" value="30" aria-label="動画音声の音量" /></span>
       <button id="unmute" aria-pressed="false">🔇 音声<span class="sw">OFF</span></button>
       <span class="volgrp"><span class="vlabel">🎙配信者マイク</span><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
       <button id="fsBtn" aria-label="全画面表示">⛶ 全画面</button>
     </div>
+  </div>
+    <!-- 配信タイトルは**映像に重ねない**。映像のすぐ下に1行で置く(オーバーレイ禁止はコメントのこと)。
+         横画面では映像とコメントが左右に分かれるので、映像とタイトルは1つの器にまとめる
+         (器に入れないと、タイトルが行方向のフレックス子になって縦いっぱいに伸びる)。 -->
+    <div id="bTitle"></div>
+  </div>
+  <div id="cmWrap">
+    <!-- P2Pが通らない回線を検出したときだけ出る。既定は非表示。 -->
+    <div id="netWarn" style="display:none"></div>
+
     <div id="comments" aria-label="コメント一覧"></div>
     <div id="cmForm">
       <button id="myAv" type="button" class="cm-av" aria-label="アイコンを変更" title="アイコンを変更"></button>
@@ -433,7 +476,7 @@ if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(doc
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.17";
+const CLIENT_VERSION = "v0.7.20";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -454,6 +497,20 @@ let joinedRoom = "";
 let ended = false;
 
 function pad3(n){ return String(n).padStart(3, "0"); }
+// OSキーボードが出ている間、下端の入力欄が隠れないよう --kb を立てる。
+// 画面全体が 100dvh 固定で、ページ自体はスクロールしない作りのため、
+// キーボードの高さを自分で測って空けるしかない。
+(function(){
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const sync = () => {
+    const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    document.documentElement.style.setProperty("--kb", kb + "px");
+  };
+  vv.addEventListener("resize", sync);
+  vv.addEventListener("scroll", sync);
+  sync();
+})();
 function setStatus(text, cls){
   $("status").textContent = T(text);
   $("dot").className = cls || "";
@@ -771,13 +828,13 @@ function startSoundOnlyWatch(){
       for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i+1] + d[i+2];
       const avg = sum / (d.length / 4 * 3); // 0..255
       const dark = avg < 8;
-      $("soundOnly").style.display = dark ? "" : "none";
+      $("soundOnly").classList.toggle("on", !!dark);
     } catch(e){ /* CORS等で読めない場合は判定しない */ }
   }, 700);
 }
 function stopSoundOnlyWatch(){
   if (soundOnlyTimer){ clearInterval(soundOnlyTimer); soundOnlyTimer = null; }
-  $("soundOnly").style.display = "none";
+  $("soundOnly").classList.remove("on");
 }
 
 function onEnded(msg, noRetry){
@@ -879,19 +936,23 @@ function addComment(name, text, ts, color, icon, host){
   body.textContent = text; // textContentで挿入(HTMLとして解釈させない)
   if (!host && /^#[0-9a-fA-F]{6}$/.test(color || "")){ meta.style.color = color; body.style.color = color; }
   div.appendChild(meta); div.appendChild(body);
-  // 先頭付近を見ているときだけ最新へ追従する。
-  //
-  // 以前は無条件に scrollTop = 0 へ戻していた。コメントは新しいものが上に入るため、
+  // 【並び順】新しいコメントを**上**に足す(ツイキャスの視聴画面に合わせる)。
+  // 追従は「先頭付近を見ているときだけ」。以前は無条件に scrollTop = 0 へ戻していたが、
   // 過去のコメントを読もうとスクロールを下げている最中に誰かが発言すると、
-  // そのたび先頭へ引き戻されて読めなくなる。視聴者が多いほど頻発する。
+  // そのたび先頭へ引き戻されて読めなくなる(視聴者が多いほど頻発する)。
   // 判定は挿入の前に行う(挿入後はスクロール位置が動きうるため)。
-  // 【並び順】コメント欄は映像と分けた「別の面」なので、チャットと同じく**新しいものを下**に足す。
-  // 追従の判定は挿入の**前**に行う(挿入後はスクロール位置が動きうるため)。
-  // 下に居るときだけ追従し、過去を読んでいる最中に引き戻さない。
-  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  box.appendChild(div);
-  while (box.childElementCount > 200) box.removeChild(box.firstChild);
-  if (atBottom) box.scrollTop = box.scrollHeight;
+  const atTop = box.scrollTop < 40;
+  // 読書位置を保つために必要なのは「先頭に足した高さ」**だけ**。
+  // 下端を剪定して縮んだ分は、読んでいる行の位置を動かさないので差し引かない。
+  const hBefore = box.scrollHeight;
+  box.insertBefore(div, box.firstChild); // 最新コメントを上に表示
+  const added = box.scrollHeight - hBefore;
+  while (box.childElementCount > 200) box.removeChild(box.lastChild);
+  if (atTop){
+    box.scrollTop = 0;
+  } else {
+    box.scrollTop += added;   // 足した分だけ下げる(ブラウザ任せにしない)
+  }
 }
 function sendComment(){
   const text = $("cmText").value.trim();
@@ -1012,25 +1073,55 @@ $("retry").onclick = () => { $("retry").classList.remove("on"); retryCount = 0; 
 // ---- 全画面 ----
 function exitFs(){
   if (document.fullscreenElement || document.webkitFullscreenElement){
-    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    const ex = document.exitFullscreen || document.webkitExitFullscreen;
+    if (ex){ try { ex.call(document); } catch(e){} }
+    return;
+  }
+  // iOS の video ネイティブ全画面に入っている場合は、video 側から抜ける
+  // (document の exit では抜けない)
+  const v = $("player");
+  if (v && v.webkitDisplayingFullscreen && v.webkitExitFullscreen){
+    try { v.webkitExitFullscreen(); } catch(e){}
   }
 }
+// 【注意】iPhone の Safari は**要素**の全画面APIを持たない(video の webkitEnterFullscreen だけ)。
+// 無い環境で undefined を呼ぶと例外になり、ボタンが無反応になる(操作クライアントで踏んだのと同じ罠)。
 $("fsBtn").onclick = () => {
-  const st = document.querySelector(".stage");
-  if (document.fullscreenElement || document.webkitFullscreenElement){
-    exitFs();
-  } else {
-    (st.requestFullscreen || st.webkitRequestFullscreen).call(st);
+  const st = document.querySelector(".stage"), v = $("player");
+  // video のネイティブ全画面も「全画面中」として扱う(document には載らない)
+  const inDocFs = document.fullscreenElement || document.webkitFullscreenElement;
+  const inVideoFs = !!(v && v.webkitDisplayingFullscreen);
+  if (inDocFs || inVideoFs){ exitFs(); return; }
+  const startVideoFs = () => {
+    if (v && v.webkitEnterFullscreen){ try { v.webkitEnterFullscreen(); } catch(e){} }
+  };
+  const req = st && (st.requestFullscreen || st.webkitRequestFullscreen);
+  if (req){
+    try {
+      const p = req.call(st);
+      // iframe に allowfullscreen が無い等は**非同期に拒否**される。そこでも video へ落とす
+      if (p && p.catch) p.catch(startVideoFs);
+      return;
+    } catch(e){ /* 同期例外は下へ落ちる */ }
   }
+  startVideoFs();
 };
+// 全画面にできる手段が1つも無い端末では、押しても何も起きないボタンを出さない
+(function(){
+  const st = document.querySelector(".stage"), v = $("player"), b = $("fsBtn");
+  if (!b) return;
+  const canElFs = !!(st && (st.requestFullscreen || st.webkitRequestFullscreen));
+  const canVideoFs = !!(v && v.webkitEnterFullscreen);
+  if (!canElFs && !canVideoFs) b.style.display = "none";
+})();
 $("fsExit").onclick = (e) => { e.stopPropagation(); exitFs(); };
 
 // ---- タイトル表示のトグル: プレーヤーをタップすると表示/非表示 ----
 (function(){
   const st = document.querySelector(".stage");
   st.addEventListener("click", (e) => {
-    // ボタン類のタップではトグルしない
-    if (e.target.closest("button")) return;
+    // ボタン類・スライダー・操作の帯のタップではトグルしない
+    if (e.target.closest("button, input, #vrow")) return;
     st.classList.toggle("hide-title");
   });
 })();
