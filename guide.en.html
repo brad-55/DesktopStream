@@ -37,6 +37,9 @@
   table { border-collapse:collapse; width:100%; font-size:14px; margin:10px 0; }
   th,td { border:1px solid #dfe7e2; padding:8px 10px; text-align:left; }
   th { background:#eef7f2; }
+  /* 補足の箱。クラスは付いているのに見た目の定義が無く、ただの段落になっていた */
+  .note { background:#f4f8f6; border-left:4px solid var(--accent); border-radius:10px;
+          padding:10px 14px; font-size:14px; margin:10px 0; }
   .tip { background:#eef7f2; border-radius:10px; padding:10px 14px; font-size:14px; margin:10px 0; }
   .tip::before { content:"💡 "; }
   .warn { background:#fdf3e7; border-radius:10px; padding:10px 14px; font-size:14px; margin:10px 0; }
@@ -71,7 +74,10 @@
   <h2>What is this?</h2>
   <p>Desktop Stream lets you view and control a Windows PC's screen and sound from a phone's browser in real time.
   The phone only needs a browser; there is no app to install. You can also control the PC's mouse from the phone.</p>
-  <p>Video travels directly between the PC and the phone (P2P means the two devices talk to each other one-to-one). No outside server sits in between, so nothing is recorded or stored.</p>
+  <p>Video travels directly between the PC and the phone (P2P means the two devices talk to each other one-to-one).
+Only the introductions (each side's address) go through a free service called Ayame Labo; <b>the video itself never passes through it</b>.
+No video is stored on a server (people watching can still record it on their own device).</p>
+<p class="note">"One-to-one" describes remote control. When you <b>stream</b>, the phone makes a separate one-to-one connection for each viewer, so the more people watch at once, the more traffic the phone sends (that is why there is a "maximum viewer count").</p>
   <p>On the PC, Desktop Stream runs as a Windows service and starts listening automatically when the PC starts. You do not need to launch it each time.
   <b>It can also show and control the UAC prompt and the lock screen.</b></p>
 </section>
@@ -94,7 +100,7 @@
   <h3>Showing it</h3>
   <p>On the PC, right-click the tray icon and choose "Open console" (double-clicking the icon also works).
   The console shows the room ID, when it was created, and QR codes.</p>
-  <p>There are two QR codes side by side.</p>
+  <p>There are two QR codes side by side. You can scan either first, but <b>scanning the room ID first</b> means the page connects as soon as you open the URL.</p>
   <table>
     <tr><th>QR code</th><th>What it contains</th></tr>
     <tr><td>Room ID (for remote access)</td><td>The key for Anywhere mode. Scan it on the phone</td></tr>
@@ -169,7 +175,7 @@
     <tr><td>🖱 Trackpad</td><td>Phones and tablets</td><td>The pointer moves as far as you slide (default)</td></tr>
     <tr><td>⌨ Text input</td><td>Typing longer text</td><td>Type in the input box, then send</td></tr>
   </table>
-  <p>When you control with a mouse connected to the PC, there is nothing to switch. If "Use a physical mouse and keyboard directly on the video" is enabled in Settings,
+  <p>When you control with a mouse connected to your phone or tablet, there is nothing to switch. If "Use a physical mouse and keyboard directly on the video" is enabled in Settings,
   moving the mouse over the video moves the PC's cursor to that spot.
   Touch is handled as the trackpad and the mouse as direct control, so <b>you can use both at the same time</b>.</p>
   <p class="note">In direct control, keys you type go straight to the PC without the input box, and Japanese input methods work as well.
@@ -209,8 +215,8 @@
   <h2>Stream</h2>
   <p>This feature shows the screen you are receiving on the phone to other people, with comments.</p>
   <h3>Starting a stream</h3>
-  <p>Open the Stream tab, open "Stream settings" if you need to check the number of rooms (how many people can watch at once; the default is 10 viewers), and press "📡 Start stream".
-  Send the URL or QR code that appears to the people you want to show it to. Your microphone is streamed too (switch with "🎙 Mic ON / 🔇 Mic muted").</p>
+  <p>Open the Stream tab, open "Stream settings" if you need to check the maximum viewer count (how many people can watch at once; the default is 10 viewers), and press "📡 Start stream".
+  Send the URL or QR code that appears to the people you want to show it to. Your microphone is streamed too (switch it with "🎙 Mic" ON/OFF).</p>
   <h3>What you can do</h3>
   <table>
     <tr><td>Switch the video</td><td>Choose a still image, remote desktop, or camera (rear). You can switch while streaming, and changes to the still image's crop frame apply immediately</td></tr>
@@ -332,9 +338,12 @@
   <h3>The phone cannot connect</h3>
   <p>Check the following in order.</p>
   <ul>
-    <li>In the console on the PC, "Firewall" shows "Registered"
-      (if not, a warning appears and you can add the rule with a button)</li>
-    <li>The browser is not showing a certificate warning. The first time, you need to allow it (in Chrome: "Advanced" → "Proceed")</li>
+    
+    <li>The browser is not showing a certificate warning. The first time, open the warning's details and choose "Proceed anyway" (the wording differs by browser).
+      The certificate is one the PC made for itself (it is only there to encrypt the connection).
+      <b>If you are on a network you do not trust (public Wi-Fi and so on), do not proceed</b> (it may be an impersonation).
+      On a network where the PC itself is located (home, office), it is fine to proceed.</li>
+    <li>In the console on the PC, the "Receive" column shows "Registered" (approving the device on the PC the first time puts it in this state; if it is not registered, a warning appears and you can add it with a button)</li>
     <li>In the console's Connection URL QR code, you chose the route you actually use (Tailscale, LAN, and so on) before scanning</li>
   </ul>
 

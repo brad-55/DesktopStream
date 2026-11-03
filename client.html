@@ -1084,7 +1084,7 @@
         <summary>配信の設定</summary>
         <div class="rsc-body">
           <div class="controls">
-            <span class="fld-inline"><label for="rsRooms">視聴者数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
+            <span class="fld-inline"><label for="rsRooms">最大視聴者数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
             <span class="fld-inline"><label for="rsSource">映像</label><select id="rsSource">
               <option value="image">🖼 静止画</option>
               <option value="desktop" selected>🖥 リモートデスクトップ</option>
@@ -1106,7 +1106,7 @@
             <span class="fld-inline"><label for="rsPass">合言葉</label><input id="rsPass" type="text" maxlength="20" placeholder="未設定なら誰でも視聴可" /></span>
           </div>
           <button id="rsRegen">視聴URLを再生成</button>
-          <span class="hintline">視聴者数は配信中に変えられません(停止してから変更)</span>
+          <span class="hintline">最大視聴者数は配信中に変えられません(停止してから変更)</span>
         </div>
       </details>
 
@@ -1389,7 +1389,7 @@ const I18N_EN = {
   "視聴者": "Viewers",
   "まだ誰も見ていません": "No one is watching yet",
   "QRを読み取ってもらうと、そのまま開けます": "They can scan the QR code to open it",
-  "視聴者数は配信中に変えられません(停止してから変更)": "The viewer count cannot be changed while streaming",
+  "最大視聴者数は配信中に変えられません(停止してから変更)": "The maximum viewer count cannot be changed while streaming",
   "PCに接続していません": "Not connected to the PC",
   "接続すると自動で映像が届きます": "Video arrives automatically once connected",
   "⏹ 配信を停止": "⏹ Stop streaming",
@@ -1398,7 +1398,7 @@ const I18N_EN = {
   "🔊 PC音声OFF": "🔊 PC audio OFF",
   "🔊 PC音声ON": "🔊 PC audio ON",
   "↑配信中の映像": "↑ Video being streamed",
-  "視聴者数": "Viewers",
+  "最大視聴者数": "Max viewers",
   "映像": "Video",
   "🖥 リモートデスクトップ": "🖥 Remote desktop",
   "📷 カメラ": "📷 Camera",
@@ -5480,7 +5480,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.17";
+const CLIENT_VERSION = "v0.7.18";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
