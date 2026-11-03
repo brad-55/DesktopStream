@@ -512,14 +512,22 @@
   #rsQr:empty { display: none; padding: 0; margin: 0; }
   /* QRは「配る」カードの中に収める。大きくすると画面の1/3を占めて主役を奪う。 */
   #rsQr canvas, #rsQr img { width: 120px; height: 120px; display: block; }
-  #rsCropStage { position: relative; display: inline-block; max-width: 100%; }
+  /* ドラッグをスクロールに横取りさせない。touch-action は**継承されない**ので、触る要素すべてに書く。
+   これが無いと、指を少し動かした時点で pointercancel が来て枠が止まる(実測)。 */
+  #rsCropStage { position: relative; display: inline-block; max-width: 100%;
+    touch-action: none; user-select: none; -webkit-user-select: none; }
   #rsCropCanvas { display: block; max-width: 100%; border-radius: var(--r-cell); }
-  #rsCropBox { position: absolute; border: 2px solid var(--tint); box-shadow: 0 0 0 9999px rgba(0,0,0,.5); cursor: move; }
-  .rh { position: absolute; width: 14px; height: 14px; background: var(--tint); border-radius: 50%; }
-  .rh[data-h="nw"] { left: -7px; top: -7px; cursor: nwse-resize; }
-  .rh[data-h="ne"] { right: -7px; top: -7px; cursor: nesw-resize; }
-  .rh[data-h="sw"] { left: -7px; bottom: -7px; cursor: nesw-resize; }
-  .rh[data-h="se"] { right: -7px; bottom: -7px; cursor: nwse-resize; }
+  #rsCropBox { position: absolute; border: 2px solid var(--tint); box-shadow: 0 0 0 9999px rgba(0,0,0,.5); cursor: move; touch-action: none; }
+  /* 見た目は14pxのまま、**当たり判定は24px**に広げる(指で掴めるように)。
+     位置は -5px にして、判定の大半を枠の内側に置く(外に出しすぎると切れる・押しにくい)。 */
+  .rh { position: absolute; width: 24px; height: 24px; background: transparent; touch-action: none; }
+  .rh::after { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--tint); }
+  /* 見た目の丸が**角をまたぐ**位置に置く(-12px + inset 5px = 中心が角)。
+     当たり判定24pxのうち12pxは外側だが、#rsCropStage / #rsCropBox に overflow は無いので切れない。 */
+  .rh[data-h="nw"] { left: -12px; top: -12px; cursor: nwse-resize; }
+  .rh[data-h="ne"] { right: -12px; top: -12px; cursor: nesw-resize; }
+  .rh[data-h="sw"] { left: -12px; bottom: -12px; cursor: nesw-resize; }
+  .rh[data-h="se"] { right: -12px; bottom: -12px; cursor: nwse-resize; }
   #rsViewers { display: flex; flex-direction: column; gap: 6px; }
   .rs-viewer {
     display: flex; align-items: center; gap: 8px; min-width: 0;
@@ -543,6 +551,8 @@
   .rs-roster-row { color: var(--label-2); }
   .rs-roster-row.left { opacity: .55; } /* 退室済み */
   .rs-comment { line-height: 1.55; word-break: break-word; }
+  /* コメントの間に薄い線。1件目の上には出さない。入退室の行も同じ扱い */
+  .rs-comment + .rs-comment { border-top: 1px solid var(--separator); padding-top: 6px; }
   .rs-cmeta { color: var(--label-3); font-size: var(--fs-body); margin-right: 6px; }
   .rs-sys { color: var(--label-3); font-style: italic; }
   .cm-host { color: var(--orange) !important; font-weight: 600; }
@@ -1057,9 +1067,9 @@
         <div id="rsViewers"></div>
       </div>
 
-      <!-- 設定は畳む。配信中に触る必要がないものをここへ集める。 -->
-      <details class="rsc-more" id="rsSetWrap">
-        <summary>配信の設定</summary>
+      <!-- 設定は**畳まない**(利用者の指示)。配信中に触る必要がないものは、この中にまとめたまま。 -->
+      <div class="rsc-card" id="rsSetWrap">
+        <div class="rsc-h">配信の設定</div>
         <div class="rsc-body">
           <div class="controls">
             <span class="fld-inline"><label for="rsRooms">最大視聴者数</label><input id="rsRooms" type="number" inputmode="numeric" value="10" min="1" max="50" /></span>
@@ -1086,7 +1096,7 @@
           <button id="rsRegen">視聴URLを再生成</button>
           <span class="hintline">最大視聴者数は配信中に変えられません(停止してから変更)</span>
         </div>
-      </details>
+      </div>
 
       <details class="rsc-more" id="rsHistWrap">
         <summary>視聴者履歴</summary>
@@ -4141,7 +4151,6 @@ async function rsSwitchSource(){
   const kind = $("rsSource").value;
   $("rsImageRow").style.display = (kind === "image") ? "" : "none";
   // 設定は畳んである。画像やカメラを選んだ直後は操作が要るので開く(デスクトップは開かない)。
-  if (kind !== "desktop" && $("rsSetWrap")) $("rsSetWrap").open = true;
   if (!rsOn) return;
   try {
     const t = await rsGetVideoTrack(kind);
@@ -4639,7 +4648,6 @@ async function rsStart(){
   $("rsToggle").textContent = T("⏹ 配信を停止");
   rsShowState();
   $("rsDot").classList.add("on");
-  if ($("rsSetWrap")) $("rsSetWrap").open = false; // 配信中は設定を畳む(誤タッチを減らす)
   $("rsMic").disabled = !rsMicTrack;
   rsSetToggle($("rsMic"), !rsMuted && !!rsMicTrack);
   rsUpdateDeskAudioBtn();
@@ -5467,7 +5475,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.20";
+const CLIENT_VERSION = "v0.7.21";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;

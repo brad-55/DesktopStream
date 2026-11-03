@@ -120,6 +120,8 @@
     scrollbar-width: thin;
   }
   .cm { font-size: 13.5px; line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; color: #e6e8ea; }
+  /* コメントの間に薄い線。1件目の上には出さない */
+  .cm + .cm { border-top: 1px solid #1c222a; padding-top: 8px; }
   .cm .meta { color: #8b96a3; margin-right: 6px; font-size: 11px; }
   /* 幅が足りないときは折り返す(名前/色/アイコンで埋まって本文が潰れるのを防ぐ) */
   #cmForm {
@@ -478,7 +480,7 @@ if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(doc
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.21";
+const CLIENT_VERSION = "v0.7.22";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
