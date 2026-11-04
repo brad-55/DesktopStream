@@ -514,10 +514,12 @@
   #rsQr canvas, #rsQr img { width: 120px; height: 120px; display: block; }
   /* ドラッグをスクロールに横取りさせない。touch-action は**継承されない**ので、触る要素すべてに書く。
    これが無いと、指を少し動かした時点で pointercancel が来て枠が止まる(実測)。 */
-  #rsCropStage { position: relative; display: inline-block; max-width: 100%;
+  /* 表示幅 = コンテナ幅 を保証する(枠の計算の基準を1つにする) */
+  #rsCropStage { position: relative; display: block; width: 100%; box-sizing: border-box;
     touch-action: none; user-select: none; -webkit-user-select: none; }
+  #rsCropCanvas { display: block; width: 100%; height: auto; }
   #rsCropCanvas { display: block; max-width: 100%; border-radius: var(--r-cell); }
-  #rsCropBox { position: absolute; border: 2px solid var(--tint); box-shadow: 0 0 0 9999px rgba(0,0,0,.5); cursor: move; touch-action: none; }
+  #rsCropBox { position: absolute; box-sizing: border-box; border: 2px solid var(--tint); box-shadow: 0 0 0 9999px rgba(0,0,0,.5); cursor: move; touch-action: none; }
   /* 見た目は14pxのまま、**当たり判定は24px**に広げる(指で掴めるように)。
      位置は -5px にして、判定の大半を枠の内側に置く(外に出しすぎると切れる・押しにくい)。 */
   .rh { position: absolute; width: 24px; height: 24px; background: transparent; touch-action: none; }
@@ -4750,56 +4752,117 @@ $("rsImageFile").addEventListener("change", (e) => {
 });
 
 // ---- 静止画クロップUI ----
+// 表示されている大きさ。0 のときは null(非表示・読み込み前)
+function rsCropSize(){
+  const cv = $("rsCropCanvas");
+  // clientWidth は整数に丸めるので、実際の表示より 1px 大きくなることがある。
+  // 実寸を取り、**切り捨て**て「必ず収まる」側に倒す。
+  const r = cv.getBoundingClientRect();
+  const w = Math.floor(r.width), h = Math.floor(r.height);
+  return (w > 0 && h > 0) ? { w: w, h: h } : null;
+}
+// モデル(比率)を [0,1] に丸める。下限は**表示サイズから決める**(20px 相当)。
+function rsNormCrop(s){
+  let r = rsCropRect || { x: 0, y: 0, w: 1, h: 1 };
+  const ok = (v) => typeof v === "number" && isFinite(v);
+  if (!ok(r.x) || !ok(r.y) || !ok(r.w) || !ok(r.h)) r = { x: 0, y: 0, w: 1, h: 1 };
+  const minW = Math.min(1, 20 / s.w), minH = Math.min(1, 20 / s.h);
+  const w = Math.min(1, Math.max(minW, r.w));
+  const h = Math.min(1, Math.max(minH, r.h));
+  rsCropRect = {
+    x: Math.min(Math.max(0, r.x), 1 - w),
+    y: Math.min(Math.max(0, r.y), 1 - h),
+    w: w, h: h
+  };
+}
+// 比率 → 枠の px。ここで 0 <= left、left+w <= 幅、20 <= w <= 幅 を必ず成り立たせる。
+function rsApplyCropRect(){
+  const s = rsCropSize(); if (!s) return;
+  rsNormCrop(s);
+  const r = rsCropRect, box = $("rsCropBox");
+  const w = Math.min(s.w, Math.max(20, Math.round(r.w * s.w)));
+  const h = Math.min(s.h, Math.max(20, Math.round(r.h * s.h)));
+  const left = Math.max(0, Math.min(Math.round(r.x * s.w), s.w - w));
+  const top  = Math.max(0, Math.min(Math.round(r.y * s.h), s.h - h));
+  box.style.left = left + "px"; box.style.top = top + "px";
+  box.style.width = w + "px"; box.style.height = h + "px";
+}
 function rsSetupCrop(){
   if (!rsImageEl) return;
   const wrap = $("rsCropWrap"), cv = $("rsCropCanvas");
   wrap.style.display = "";
-  // プレビュー用に元画像を最大360px幅で描画
+  // プレビュー用に元画像を最大360px幅で描画(キャンバスの**内部**サイズ)
   const maxW = 360;
   const scale = Math.min(1, maxW / rsImageEl.naturalWidth);
   cv.width = Math.round(rsImageEl.naturalWidth * scale);
   cv.height = Math.round(rsImageEl.naturalHeight * scale);
   cv.getContext("2d").drawImage(rsImageEl, 0, 0, cv.width, cv.height);
-  // クロップ枠を全体に初期化
-  const box = $("rsCropBox");
-  box.style.left = "0px"; box.style.top = "0px";
-  box.style.width = cv.width + "px"; box.style.height = cv.height + "px";
+  // 枠は**表示サイズ**から決める(内部サイズではない。ここを取り違えると画像からはみ出す)
   rsCropRect = { x: 0, y: 0, w: 1, h: 1 };
+  rsApplyCropRect();
 }
 (function(){
   const stage = $("rsCropStage"), box = $("rsCropBox");
-  let mode = null, sx = 0, sy = 0, sb = null;
-  const cv = () => $("rsCropCanvas");
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  let mode = null, sx = 0, sy = 0, sb = null, dw = 0, dh = 0, dragNow = false, activeId = null;
   const start = (ev) => {
+    // 2本目の指と、枠の外(画像の余白)からのドラッグは無視する。
+    // 枠の外で始めると「触っていないのに枠が動く」ことになる。
+    if (mode || activeId !== null) return;
+    if (!ev.target || !ev.target.closest || !ev.target.closest("#rsCropBox")) return;
     ev.preventDefault();
-    const h = ev.target.dataset ? ev.target.dataset.h : null;
-    mode = h || "move";
+    const s = rsCropSize(); if (!s) return;
+    activeId = ev.pointerId;
+    dw = s.w; dh = s.h;
+    rsApplyCropRect();     // 比率→px を引き直してから測る(古い px を持ち込まない)
+    dragNow = true;
+    mode = (ev.target.dataset && ev.target.dataset.h) || "move";
     sx = ev.clientX; sy = ev.clientY;
     sb = { l: box.offsetLeft, t: box.offsetTop, w: box.offsetWidth, h: box.offsetHeight };
     try { stage.setPointerCapture(ev.pointerId); } catch(e){}
   };
   const move = (ev) => {
-    if (!mode) return;
-    const cw = cv().width, ch = cv().height;
-    let dx = ev.clientX - sx, dy = ev.clientY - sy;
+    if (!mode || !dw || !dh || ev.pointerId !== activeId) return;
+    ev.preventDefault();
+    const dx = ev.clientX - sx, dy = ev.clientY - sy;
     let l = sb.l, t = sb.t, w = sb.w, h = sb.h;
-    if (mode === "move"){ l = clamp(sb.l + dx, 0, cw - w); t = clamp(sb.t + dy, 0, ch - h); }
-    else {
-      if (mode.includes("w")){ l = clamp(sb.l + dx, 0, sb.l + sb.w - 20); w = sb.w - (l - sb.l); }
-      if (mode.includes("e")){ w = clamp(sb.w + dx, 20, cw - sb.l); }
-      if (mode.includes("n")){ t = clamp(sb.t + dy, 0, sb.t + sb.h - 20); h = sb.h - (t - sb.t); }
-      if (mode.includes("s")){ h = clamp(sb.h + dy, 20, ch - sb.t); }
+    if (mode === "move"){
+      l = Math.min(Math.max(0, sb.l + dx), Math.max(0, dw - w));
+      t = Math.min(Math.max(0, sb.t + dy), Math.max(0, dh - h));
+    } else {
+      if (mode.includes("w")){                       // 右辺を固定
+        l = Math.min(Math.max(0, sb.l + dx), Math.max(0, sb.l + sb.w - 20));
+        w = sb.w + (sb.l - l);
+      }
+      if (mode.includes("e")){                       // 左辺を固定
+        w = Math.min(Math.max(20, sb.w + dx), Math.max(0, dw - sb.l));
+      }
+      if (mode.includes("n")){                       // 下辺を固定
+        t = Math.min(Math.max(0, sb.t + dy), Math.max(0, sb.t + sb.h - 20));
+        h = sb.h + (sb.t - t);
+      }
+      if (mode.includes("s")){                       // 上辺を固定
+        h = Math.min(Math.max(20, sb.h + dy), Math.max(0, dh - sb.t));
+      }
     }
     box.style.left = l + "px"; box.style.top = t + "px";
     box.style.width = w + "px"; box.style.height = h + "px";
-    rsCropRect = { x: l / cw, y: t / ch, w: w / cw, h: h / ch };
+    rsCropRect = { x: l / dw, y: t / dh, w: w / dw, h: h / dh };   // 毎回モデルへ書き戻す
   };
-  const end = () => { mode = null; };
+  const end = (ev) => {
+    if (!mode || (ev && ev.pointerId !== activeId)) return;
+    mode = null; activeId = null; dragNow = false;
+    rsApplyCropRect();
+  };
   stage.addEventListener("pointerdown", start);
   stage.addEventListener("pointermove", move);
   stage.addEventListener("pointerup", end);
   stage.addEventListener("pointercancel", end);
+  // キャプチャが外れた場合も必ず解除する(残ると次のドラッグが始まらなくなる)
+  stage.addEventListener("lostpointercapture", end);
+  // 画面幅が変わったら追従する(ドラッグ中は止める)。登録は1回だけ。
+  if (window.ResizeObserver){
+    new ResizeObserver(() => { if (!dragNow) rsApplyCropRect(); }).observe($("rsCropCanvas"));
+  }
 })();
 $("rsCropReset").onclick = () => {
   rsCropRect = { x: 0, y: 0, w: 1, h: 1 };
@@ -5475,7 +5538,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.21";
+const CLIENT_VERSION = "v0.7.22";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
