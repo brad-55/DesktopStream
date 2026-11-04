@@ -1087,8 +1087,12 @@
           <div id="rsCropWrap" style="display:none">
             <div class="hintline">枠をドラッグ/リサイズして切り取り範囲を調整(配信中は即時反映)</div>
             <div id="rsCropStage"><canvas id="rsCropCanvas"></canvas><div id="rsCropBox"><span class="rh" data-h="nw"></span><span class="rh" data-h="ne"></span><span class="rh" data-h="sw"></span><span class="rh" data-h="se"></span></div></div>
-            <div class="controls"><button id="rsCropReset">全体に戻す</button></div>
+            <div class="controls">
+              <button id="rsCropReset">全体に戻す</button>
+              <button id="rsCropDone" class="primary">範囲を決定</button>
+            </div>
           </div>
+          <div class="controls"><button id="rsCropOpen" style="display:none">切り取りを調整</button></div>
           <div class="controls">
             <span class="fld-inline"><label for="rsTitle">タイトル</label><input id="rsTitle" type="text" maxlength="40" placeholder="配信タイトル(任意)" /></span>
           </div>
@@ -1097,6 +1101,13 @@
           </div>
           <button id="rsRegen">視聴URLを再生成</button>
           <span class="hintline">最大視聴者数は配信中に変えられません(停止してから変更)</span>
+          <div class="controls">
+            <span class="hintline">コメント履歴 <b id="rsHistN">0</b> 件(この端末に保存。最大500件)</span>
+          </div>
+          <div class="controls">
+            <button id="rsHistExport" disabled>Markdown で書き出す</button>
+            <button id="rsHistClear" disabled>履歴を消す</button>
+          </div>
         </div>
       </div>
 
@@ -4463,6 +4474,9 @@ function rsAddComment(c, roomNo){
   body.textContent = c.text; // textContentで挿入しHTMLとして解釈させない
   if (c.color && !c.host){ head.style.color = c.color; body.style.color = c.color; }
   div.appendChild(head); div.appendChild(body);
+  // 端末にも残す(停止・終了後も書き出せるように)
+  rsSaveComment({ ts: c.ts, name: c.name, text: c.text, color: c.color, room: roomNo });
+  rsRefreshHistCount();
   // 先頭付近を見ているときだけ最新へ追従する。
   //
   // 以前は無条件に scrollTop = 0 へ戻していた。コメントは新しいものが上に入るため、
@@ -4726,7 +4740,26 @@ function rsShowQR(url){
   sc.onerror = () => { $("rsQr").textContent = T("QR生成ライブラリを読み込めませんでした。URLをコピーして共有してください。"); };
   document.head.appendChild(sc);
 }
-$("rsToggle").onclick = () => { if (rsOn) rsStop(); else rsStart(); };
+$("rsCropDone").onclick = () => { rsCloseCrop(); rsLog("切り取り範囲を決めました"); };
+$("rsCropOpen").onclick = () => {
+  if (!rsImageEl) return;
+  const o = $("rsCropOpen"); if (o) o.style.display = "none";
+  rsSetupCrop();                       // 中で表示に戻す(範囲は保たれる)
+};
+$("rsHistExport").onclick = () => { rsExportComments(); };
+$("rsHistClear").onclick = () => {
+  if (!confirm("保存しているコメント履歴を消します。よろしいですか?")) return;
+  try { localStorage.removeItem(RS_COMMENTS_KEY); } catch(e){}
+  rsRefreshHistCount();
+  rsLog("コメント履歴を消しました");
+};
+rsRefreshHistCount();
+// 読み込み直したときにも件数を出す(上の呼び出しは要素より先に走ることがある)
+window.addEventListener("load", rsRefreshHistCount);
+$("rsToggle").onclick = () => {
+  if (!rsOn) rsCloseCrop();            // 配信を始めるときは暗幕を残さない
+  if (rsOn) rsStop(); else rsStart();
+};
 $("rsMic").onclick = () => {
   rsMuted = !rsMuted;
   if (rsMicTrack) rsMicTrack.enabled = !rsMuted; // マイクは独立トラックなので enabled で即消音
@@ -4752,6 +4785,63 @@ $("rsImageFile").addEventListener("change", (e) => {
 });
 
 // ---- 静止画クロップUI ----
+// ---- コメント履歴(端末に残す) ----
+// 画面のコメントは最新200件だけだが、**端末には最大500件**を残して書き出せるようにする。
+// 画面へは自動で戻さない(前の配信のコメントが混ざらないように)。
+const RS_KEEP_COMMENTS = 500;
+const RS_COMMENTS_KEY = "dss_rs_comment_hist";
+let rsSaveWarned = false;
+function rsLoadComments(){
+  try {
+    const a = JSON.parse(localStorage.getItem(RS_COMMENTS_KEY) || "[]");
+    return Array.isArray(a) ? a : [];
+  } catch(e){ return []; }
+}
+function rsSaveComment(c){
+  const h = rsLoadComments();
+  h.push({ ts: Number(c.ts) || Date.now(), name: String(c.name || ""), text: String(c.text || ""),
+           color: c.color || "", room: Number(c.room) || 0 });
+  while (h.length > RS_KEEP_COMMENTS) h.shift();
+  try { localStorage.setItem(RS_COMMENTS_KEY, JSON.stringify(h)); }
+  catch(e){ if (!rsSaveWarned){ rsSaveWarned = true; rsLog("履歴を保存できません(空き容量が足りません)"); } }
+}
+function rsRefreshHistCount(){
+  const n = rsLoadComments().length;
+  const el = $("rsHistN"); if (el) el.textContent = String(n);
+  const ex = $("rsHistExport"), cl = $("rsHistClear");
+  if (ex) ex.disabled = n === 0;
+  if (cl) cl.disabled = n === 0;
+}
+const rsPad2 = (n) => (n < 10 ? "0" : "") + n;
+function rsFmtTs(ts){
+  const d = new Date(ts);
+  return d.getFullYear() + "/" + rsPad2(d.getMonth() + 1) + "/" + rsPad2(d.getDate()) + " " +
+         rsPad2(d.getHours()) + ":" + rsPad2(d.getMinutes()) + ":" + rsPad2(d.getSeconds());
+}
+// Markdown の表でもHTMLでも壊れないようにする(この順番: バックスラッシュ → HTML → 表の区切り → 改行)
+const rsMdCell = (v) => String(v)
+  .replace(/\\/g, "\\\\")
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/\|/g, "\\|")
+  .replace(/\r?\n/g, " ");
+function rsExportComments(){
+  const h = rsLoadComments();
+  if (!h.length) return;
+  const body = h.map((c) => "| " + rsFmtTs(c.ts) + " | " + (c.room ? "#" + c.room : "") + " | " +
+                                 rsMdCell(c.name) + " | " + rsMdCell(c.text) + " |");
+  const head = [
+    "# 配信のコメント履歴", "",
+    "- 件数: " + h.length,
+    "- 期間: " + rsFmtTs(h[0].ts) + " 〜 " + rsFmtTs(h[h.length - 1].ts), "",
+    "| 時刻 | 部屋 | 名前 | コメント |", "|---|---|---|---|"
+  ];
+  const blob = new Blob([head.concat(body).join("\n")], { type: "text/markdown;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "comments-" + rsFmtTs(Date.now()).slice(0, 10).replace(/\//g, "-") + ".md";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 // 表示されている大きさ。0 のときは null(非表示・読み込み前)
 function rsCropSize(){
   const cv = $("rsCropCanvas");
@@ -4800,6 +4890,11 @@ function rsSetupCrop(){
   // 枠は**表示サイズ**から決める(内部サイズではない。ここを取り違えると画像からはみ出す)
   rsCropRect = { x: 0, y: 0, w: 1, h: 1 };
   rsApplyCropRect();
+}
+// 範囲を決めたら**暗幕ごと閉じる**(閉じる手段が無いと画面が暗いままになる)
+function rsCloseCrop(){
+  const w = $("rsCropWrap"); if (w) w.style.display = "none";
+  const o = $("rsCropOpen"); if (o) o.style.display = "";
 }
 (function(){
   const stage = $("rsCropStage"), box = $("rsCropBox");
@@ -5538,7 +5633,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.22";
+const CLIENT_VERSION = "v0.7.23";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;

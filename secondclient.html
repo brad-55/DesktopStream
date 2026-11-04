@@ -176,25 +176,32 @@
   /* 音量と全画面: 映像の下端に**小さく**重ねる。
      コメントは重ねない(利用者の指示: オーバーレイ禁止はコメントのこと)。
      操作の帯だけは全画面でも使えるよう、映像の中に置く。 */
+  /* 帯は映像の外。1段・36px。全画面でも残る(入れ物ごと全画面にするため) */
   #vrow {
-    position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 6;
-    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px;
-    padding: 6px 10px; border-radius: 12px;
-    background: rgba(13,17,22,.74); border: 1px solid rgba(255,255,255,.14);
+    position: static; z-index: auto; flex: none;
+    display: flex; align-items: center; gap: 6px;
+    min-height: 36px; padding: 4px 10px;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+    background: #0d1116; border-top: 1px solid rgba(255,255,255,.10);
   }
-  #vrow .volgrp { grid-column: 1; }
-  #vrow .vlabel { font-size: 10px; }
+  #vrow .volgrp { flex: 1 1 0; min-width: 0; }
+  #vrow input[type=range] { width: 100%; }
+  #vrow button { flex: none; min-height: 28px; padding: 0 8px; font-size: 12px; }
+  /* 全画面: 入れ物ごと(実APIと疑似の両方)。カンマ連結にしない */
+  #stagewrap:fullscreen { display: flex; flex-direction: column; background: #000; }
+  #stagewrap:-webkit-full-screen { display: flex; flex-direction: column; background: #000; }
+  body.pfs #stagewrap { position: fixed; inset: 0; z-index: 999; background: #000;
+    display: flex; flex-direction: column; }
+  body.pfs { overflow: hidden; }
+  #stagewrap:fullscreen .stage { flex: 1 1 auto; min-height: 0; }
+  #stagewrap:-webkit-full-screen .stage { flex: 1 1 auto; min-height: 0; }
+  body.pfs #stagewrap .stage { flex: 1 1 auto; min-height: 0; }
   /* 帯の中のボタンは小さく。**同じセレクタを2か所に書かない**(後勝ちで寸法が戻る) */
   #vrow #unmute, #vrow #fsBtn {
-    grid-column: 2;
-    flex: none; min-height: 28px; padding: 3px 8px; font: inherit; font-size: 11px;
+    flex: none; min-height: 28px; padding: 0 8px; font: inherit; font-size: 12px;
     background: #161b21; color: #e6e8ea; border: 1px solid #2a323b; border-radius: 8px;
     cursor: pointer; touch-action: manipulation; white-space: nowrap;
   }
-  #vrow .volgrp:nth-of-type(1) { grid-row: 1; }
-  #vrow .volgrp:nth-of-type(2) { grid-row: 2; }
-  #vrow #unmute { grid-row: 1; }
-  #vrow #fsBtn { grid-row: 2; }
   /* 音量バランス: 動画音声(PC音声)と配信者マイクの2本 */
   .volgrp { display: flex; align-items: center; gap: 5px; min-width: 0; }
   .volgrp .vlabel { font-size: 11px; color: #9aa4b0; flex: none; }
@@ -312,14 +319,14 @@
     <div id="soundOnly">♪ Sound Only</div>
     <button id="fsExit" aria-label="全画面を終了">✕ 全画面を終了</button>
     <button id="retry">↻ もう一度さがす</button>
-    <!-- 操作の帯は映像の中に小さく重ねる(全画面でも使えるように)。コメントは重ねない。 -->
-    <div id="vrow">
-      <span class="volgrp"><span class="vlabel">🎬動画</span><input id="volDesk" type="range" min="0" max="100" value="30" aria-label="動画音声の音量" /></span>
-      <button id="unmute" aria-pressed="false">🔇 音声<span class="sw">OFF</span></button>
-      <span class="volgrp"><span class="vlabel">🎙配信者マイク</span><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
-      <button id="fsBtn" aria-label="全画面表示">⛶ 全画面</button>
-    </div>
   </div>
+    <!-- 操作の帯は**映像の外**(映像のすぐ下)に1段で置く。全画面は「入れ物ごと」なので帯も残る。 -->
+    <div id="vrow">
+      <span class="volgrp"><input id="volDesk" type="range" min="0" max="100" value="30" aria-label="動画音声の音量" /></span>
+      <span class="volgrp"><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
+      <button id="unmute" aria-pressed="false" aria-label="音声のオン・オフ">🔇<span class="sw">OFF</span></button>
+      <button id="fsBtn" aria-label="全画面表示">⛶</button>
+    </div>
     <!-- 配信タイトルは**映像に重ねない**。映像のすぐ下に1行で置く(オーバーレイ禁止はコメントのこと)。
          横画面では映像とコメントが左右に分かれるので、映像とタイトルは1つの器にまとめる
          (器に入れないと、タイトルが行方向のフレックス子になって縦いっぱいに伸びる)。 -->
@@ -480,7 +487,7 @@ if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(doc
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.22";
+const CLIENT_VERSION = "v0.7.23";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -1109,6 +1116,7 @@ $("retry").onclick = () => { $("retry").classList.remove("on"); retryCount = 0; 
 
 // ---- 全画面 ----
 function exitFs(){
+  document.body.classList.remove("pfs");
   if (document.fullscreenElement || document.webkitFullscreenElement){
     const ex = document.exitFullscreen || document.webkitExitFullscreen;
     if (ex){ try { ex.call(document); } catch(e){} }
@@ -1124,18 +1132,19 @@ function exitFs(){
 // 【注意】iPhone の Safari は**要素**の全画面APIを持たない(video の webkitEnterFullscreen だけ)。
 // 無い環境で undefined を呼ぶと例外になり、ボタンが無反応になる(操作クライアントで踏んだのと同じ罠)。
 $("fsBtn").onclick = () => {
-  const st = document.querySelector(".stage"), v = $("player");
-  // video のネイティブ全画面も「全画面中」として扱う(document には載らない)
+  // 映像だけを全画面にすると**帯が画面外に出て**、音量も解除もできなくなる。
+  // 映像と帯を包む #stagewrap を全画面にする。
+  const wrap = document.getElementById("stagewrap"), v = $("player");
   const inDocFs = document.fullscreenElement || document.webkitFullscreenElement;
   const inVideoFs = !!(v && v.webkitDisplayingFullscreen);
-  if (inDocFs || inVideoFs){ exitFs(); return; }
+  if (inDocFs || inVideoFs || document.body.classList.contains("pfs")){ exitFs(); return; }
   const startVideoFs = () => {
     if (v && v.webkitEnterFullscreen){ try { v.webkitEnterFullscreen(); } catch(e){} }
   };
-  const req = st && (st.requestFullscreen || st.webkitRequestFullscreen);
+  const req = wrap && (wrap.requestFullscreen || wrap.webkitRequestFullscreen);
   if (req){
     try {
-      const p = req.call(st);
+      const p = req.call(wrap);
       // iframe に allowfullscreen が無い等は**非同期に拒否**される。そこでも video へ落とす
       if (p && p.catch) p.catch(startVideoFs);
       return;
@@ -1152,6 +1161,12 @@ $("fsBtn").onclick = () => {
   if (!canElFs && !canVideoFs) b.style.display = "none";
 })();
 $("fsExit").onclick = (e) => { e.stopPropagation(); exitFs(); };
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !document.body.classList.contains("pfs")) return;
+  const t = e.target;
+  if (t && (t.matches && t.matches("input, textarea, select") || t.isContentEditable)) return;
+  exitFs();
+});
 
 // ---- タイトル表示のトグル: プレーヤーをタップすると表示/非表示 ----
 (function(){
