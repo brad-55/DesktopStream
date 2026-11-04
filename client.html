@@ -339,7 +339,13 @@
       inset 0 1px 0 rgba(255,255,255,.10),
       inset 0 0 0 .5px rgba(255,255,255,.08);
   }
-  .tabgrp[data-kind="remote"] { flex: 3; }
+  /* 左(リモート操作)の帯は**薄い青**。右(配信)の緑と同じ作り */
+  .tabgrp[data-kind="remote"] { flex: 3;
+    background: rgba(124,196,255,.07);
+    box-shadow:
+      0 8px 32px rgba(0,0,0,.38),
+      inset 0 0 0 .5px rgba(124,196,255,.30);
+  }
   /* 配信側は**縁を緑**にして、ごく薄く色を敷く(「配信中」の帯より弱くして混同しない) */
   .tabgrp[data-kind="live"] { flex: 2;
     background: rgba(46,207,142,.07);
@@ -531,6 +537,13 @@
   /* ドラッグをスクロールに横取りさせない。touch-action は**継承されない**ので、触る要素すべてに書く。
    これが無いと、指を少し動かした時点で pointercancel が来て枠が止まる(実測)。 */
   /* 表示幅 = コンテナ幅 を保証する(枠の計算の基準を1つにする) */
+  /* 押した手応えをはっきり出す。幅は最長の文言で予約して、行が跳ねないようにする */
+  #rsCopy { box-sizing: border-box; min-width: 113px; white-space: nowrap; }
+  #rsCopy.ok { background: var(--tint); color: #04210f; border-color: transparent; }
+  #rsCopy.ng { background: #ff453a; color: #2a0a08; border-color: transparent; }
+  /* 画面には出さず、読み上げにだけ使う */
+  .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   #rsCropStage { position: relative; display: block; width: 100%; box-sizing: border-box;
     touch-action: none; user-select: none; -webkit-user-select: none; }
   #rsCropCanvas { display: block; width: 100%; height: auto; }
@@ -1080,7 +1093,8 @@
         <div class="rsc-hrow"><span class="rsc-h">見せたい人に配る</span></div>
         <div class="rsc-urlrow">
           <input id="rsUrl" type="text" readonly placeholder="配信を開始すると表示されます" />
-          <button id="rsCopy">コピー</button>
+          <button id="rsCopy" disabled>コピー</button>
+          <span id="copyMsg" aria-live="polite" class="vh"></span>
         </div>
         <div id="rsQr"></div>
         <span class="hintline">QRを読み取ってもらうと、そのまま開けます</span>
@@ -4753,7 +4767,7 @@ function rsStop(){
 function rsShowShareUrl(){
   const rooms = Math.max(1, Math.min(50, parseInt($("rsRooms").value, 10) || 10));
   const url = RS_DIST_URL + "?room=" + rsBase + rsPad3(rooms + 1);
-  $("rsUrl").value = url;
+  rsSetUrl(url);
   rsShowQR(url);
 }
 function rsShowQR(url){
@@ -4990,12 +5004,50 @@ $("rsCropReset").onclick = () => {
   rsSetupCrop();
   rsDrawImage();
 };
+// ---- 視聴URLのコピー ----
+// 押したことが分かるように、**成否を実際に判定**して見た目を変える。
+const rsUrlEl = $("rsUrl");
+function rsSyncCopyEnabled(){ const b = $("rsCopy"); if (b) b.disabled = !rsUrlEl.value.trim(); }
+function rsSetUrl(u){ rsUrlEl.value = u || ""; rsSyncCopyEnabled(); }
+let copyTimer = null, liveTimer = null;
+function rsCopyState(kind){
+  const b = $("rsCopy"), msg = $("copyMsg");
+  if (!b) return;
+  b.classList.toggle("ok", kind === "ok");
+  b.classList.toggle("ng", kind === "ng");
+  const label = kind === "ok" ? "コピーしました" : kind === "ng" ? "コピーできません" : "コピー";
+  b.textContent = T(label);
+  // 読み上げは「同じ文言の連続」だと通知されないことがあるので、一度空にしてから入れる。
+  // この短いタイマーも**持ち回って必ず捨てる**(連打で古い文言が出ないように)。
+  if (msg){
+    msg.textContent = "";
+    if (liveTimer){ clearTimeout(liveTimer); liveTimer = null; }
+    if (kind) liveTimer = setTimeout(() => { liveTimer = null; msg.textContent = T(label); }, 30);
+  }
+  // 連打しても前のタイマーが残らないように、毎回捨ててから張り直す
+  if (copyTimer){ clearTimeout(copyTimer); copyTimer = null; }
+  if (kind) copyTimer = setTimeout(() => rsCopyState(""), 1600);
+}
 $("rsCopy").onclick = async () => {
-  const u = $("rsUrl").value;
-  if (!u) return;
-  try { await navigator.clipboard.writeText(u); rsLog("URLをコピーしました"); }
-  catch(e){ $("rsUrl").select(); document.execCommand("copy"); rsLog("URLをコピーしました"); }
+  const u = rsUrlEl.value;
+  if (!u.trim()) return;
+  let ok = false;
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    try { await navigator.clipboard.writeText(u); ok = true; } catch(e){ ok = false; }
+  }
+  if (!ok){
+    try {
+      rsUrlEl.focus(); rsUrlEl.select();
+      try { rsUrlEl.setSelectionRange(0, 9999); } catch(e){}
+      ok = !!document.execCommand("copy");   // 実装によって true / undefined を返すので真偽で見る
+    } catch(e){ ok = false; }
+  }
+  // 成功したら選択のハイライトを消す。失敗したら残す(手でコピーできるように)
+  if (ok){ try { rsUrlEl.blur(); } catch(e){} }
+  rsCopyState(ok ? "ok" : "ng");
+  rsLog(ok ? "URLをコピーしました" : "コピーできませんでした(URLを選択してコピーしてください)");
 };
+rsSyncCopyEnabled();
 
 
 // ================= スクロール(ホイール) =================
@@ -5659,7 +5711,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.24";
+const CLIENT_VERSION = "v0.7.25";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
