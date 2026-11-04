@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>マイクの確認 — DesktopStream</title>
+<style>
+  body { margin: 0; padding: 16px; background: #0d1116; color: #e6e8ea;
+    font: 15px/1.6 -apple-system, "Segoe UI", "Hiragino Sans", sans-serif; }
+  h1 { font-size: 17px; margin: 0 0 12px; }
+  .row { background: #161b21; border: 1px solid #2a323b; border-radius: 10px;
+    padding: 10px 12px; margin: 0 0 10px; }
+  .k { color: #8b96a3; font-size: 12px; }
+  .v { font-weight: 600; }
+  .ok { color: #2ecf8e; } .ng { color: #ff6b5e; }
+  button { min-height: 44px; padding: 0 16px; font: inherit; font-weight: 600;
+    background: #1f6feb; color: #fff; border: 0; border-radius: 10px; }
+  #meter { height: 14px; background: #0d1116; border: 1px solid #2a323b; border-radius: 7px; overflow: hidden; }
+  #bar { height: 100%; width: 0; background: #2ecf8e; transition: width .08s linear; }
+  code { background: #0d1116; padding: 1px 5px; border-radius: 4px; }
+</style></head>
+<body>
+<h1>マイクの確認</h1>
+<p class="k">iPhone で配信のマイクが ON にできない件の切り分け用です。下のボタンを押すと、配信と同じ要求で順に試します。</p>
+<div id="env"></div>
+<button id="go">マイクを試す</button>
+<div id="out"></div>
+<div class="row" id="meterRow" style="display:none">
+  <div class="k">マイクの入力レベル(喋ると伸びます)</div>
+  <div id="meter"><div id="bar"></div></div>
+</div>
+<script>
+(function(){
+  const env = document.getElementById("env");
+  const out = document.getElementById("out");
+  const line = (k, v, cls) => '<div class="row"><div class="k">' + k + '</div><div class="v ' + (cls || "") + '">' + v + '</div></div>';
+  env.innerHTML =
+    line("安全な接続(HTTPS)", String(location.protocol === "https:"), location.protocol === "https:" ? "ok" : "ng") +
+    line("このページのURL", location.origin) +
+    line("getUserMedia がある", String(!!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia))) +
+    line("audioSession(あれば)", ("audioSession" in navigator) ? String(navigator.audioSession.type) : "この端末には無い");
+
+  const tries = [
+    { label: "制約あり(PCと同じ)", c: { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 } } } },
+    { label: "1ch", c: { audio: { channelCount: 1 } } },
+    { label: "素の要求", c: { audio: true } },
+  ];
+
+  document.getElementById("go").onclick = async () => {
+    out.innerHTML = "";
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
+      out.innerHTML = line("結果", "この接続では使えません(HTTPSで開いてください)", "ng");
+      return;
+    }
+    try { if (navigator.audioSession) navigator.audioSession.type = "play-and-record"; } catch(e){}
+    let stream = null;
+    for (const t of tries){
+      try {
+        const s = await navigator.mediaDevices.getUserMedia(t.c);
+        out.innerHTML += line(t.label, "成功しました", "ok");
+        stream = s;
+        break;
+      } catch(e){
+        out.innerHTML += line(t.label, "失敗: " + (e.name || "?") + " / " + (e.message || ""), "ng");
+      }
+    }
+    if (!stream){
+      out.innerHTML += line("まとめ", "どこでも取得できませんでした。上の名前(NotAllowedError など)を教えてください", "ng");
+      return;
+    }
+    const tr = stream.getAudioTracks()[0];
+    out.innerHTML += line("トラック", tr.label + " / " + tr.readyState + " / " + (tr.getSettings().channelCount || "?") + "ch") +
+      line("止まったら気づくか", "onmute / onended を監視中");
+    tr.onmute = () => { out.innerHTML += line("通知", "muted(OSに止められました)", "ng"); };
+    tr.onended = () => { out.innerHTML += line("通知", "ended(マイクが終了しました)", "ng"); };
+
+    // 実際に拾えているかをメーターで見る
+    document.getElementById("meterRow").style.display = "";
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    try { if (ac.state === "suspended") await ac.resume(); } catch(e){}
+    const src = ac.createMediaStreamSource(stream);
+    const an = ac.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    const bar = document.getElementById("bar");
+    (function loop(){
+      an.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128));
+      bar.style.width = Math.min(100, Math.round(peak / 128 * 100 * 3)) + "%";
+      requestAnimationFrame(loop);
+    })();
+  };
+})();
+</script>
+</body></html>
