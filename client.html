@@ -326,9 +326,11 @@
   }
 
   /* ---------- タブバー(下部に浮かぶカプセル) ---------- */
-  #tabbar {
-    display: flex; gap: 4px; padding: 4px; flex: none;
-    border-radius: var(--r-pill);
+  /* 帯そのものを**2つに割る**。色が見分けにくくても、形で「用途が違う」と分かる */
+  #tabbar { display: flex; gap: 8px; padding: 0; flex: none; border-radius: 0;
+    background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .tabgrp {
+    display: flex; gap: 2px; padding: 4px; border-radius: var(--r-pill);
     background: rgba(30,30,32,.62);
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
@@ -337,13 +339,27 @@
       inset 0 1px 0 rgba(255,255,255,.10),
       inset 0 0 0 .5px rgba(255,255,255,.08);
   }
+  .tabgrp[data-kind="remote"] { flex: 3; }
+  /* 配信側は**縁を緑**にして、ごく薄く色を敷く(「配信中」の帯より弱くして混同しない) */
+  .tabgrp[data-kind="live"] { flex: 2;
+    background: rgba(46,207,142,.07);
+    box-shadow:
+      0 8px 32px rgba(0,0,0,.38),
+      inset 0 0 0 .5px rgba(46,207,142,.30);
+  }
+    /* 320px でも4文字が折り返さない幅に収める(省略記号は使わない) */
   .tab-btn {
-    flex: 1; min-height: 44px; padding: 8px 6px;
+    flex: 1 1 0; min-width: 0; white-space: nowrap;
+    min-height: 44px; padding: 8px 2px;
     border: none; background: transparent; color: var(--label-2);
     font: inherit; font-size: var(--fs-body); font-weight: 600;
     border-radius: var(--r-pill); cursor: pointer; touch-action: manipulation;
   }
+  /* 狭い画面では一段小さく(既存の10pxを使う。種類を増やさない) */
+  @media (max-width: 360px){ .tab-btn { font-size: 10px; } }
   .tab-btn.active { background: var(--bg-3); color: var(--tint); }
+  /* 選択色も分ける: リモート操作は青、配信は緑 */
+  .tabgrp[data-kind="remote"] .tab-btn.active { color: #7cc4ff; }
 
   /* ---------- タブ本体 ---------- */
   .tabpage {
@@ -933,12 +949,18 @@
 
   <div id="rightcol">
     <!-- タブバー -->
+    <!-- 用途ごとに2つのかたまりへ分ける(左=リモート操作 / 右=配信)。
+         見た目で「どちらのための画面か」が分かるようにする。 -->
     <div id="tabbar">
-      <button class="tab-btn active" data-tab="operate">操作</button>
-      <button class="tab-btn" data-tab="connect">接続状態</button>
-      <button class="tab-btn" data-tab="restream">配信</button>
-      <button class="tab-btn" data-tab="comment">コメント</button>
-      <button class="tab-btn" data-tab="settings">設定</button>
+      <div class="tabgrp" data-kind="remote" role="group" aria-label="リモート操作">
+        <button class="tab-btn active" data-tab="operate" aria-current="true">操作</button>
+        <button class="tab-btn" data-tab="connect">接続状態</button>
+        <button class="tab-btn" data-tab="settings">設定</button>
+      </div>
+      <div class="tabgrp" data-kind="live" role="group" aria-label="配信">
+        <button class="tab-btn" data-tab="restream">配信</button>
+        <button class="tab-btn" data-tab="comment">コメント</button>
+      </div>
     </div>
 
     <!-- 操作タブ -->
@@ -2090,7 +2112,11 @@ function applyUpperLayout(){
 
 function switchTab(name){
   currentTab = name;
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    const on = b.dataset.tab === name;
+    b.classList.toggle("active", on);
+    if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
+  });
   document.querySelectorAll(".tabpage").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
   localStorage.setItem("dss_tab", name);
   applyUpperLayout();
@@ -5633,7 +5659,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.23";
+const CLIENT_VERSION = "v0.7.24";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
