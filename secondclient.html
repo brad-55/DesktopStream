@@ -82,13 +82,9 @@
     background: #48484a; color: #f5f5f7;
   }
   .sw.on { background: #30d158; color: #06240f; }
-  #unmute {
-    flex: none;
-    padding: 6px 10px; min-height: 34px; font: inherit; font-size: 12px; color: #e6e8ea;
-    background: #161b21; border: 1px solid #2a323b; border-radius: 6px;
-    cursor: pointer; touch-action: manipulation; display: none;
-  }
-  #unmute.on { display: inline-block; }
+  /* 音が来るまでは出さない。見た目は .vrow-btns button と揃える */
+  #unmute { display: none; }
+  #unmute.on { display: block; }
   #retry {
     position: absolute; left: 50%; top: 62%; transform: translate(-50%,-50%);
     padding: 10px 16px; font: inherit; font-size: 13px; color: #e6e8ea;
@@ -169,15 +165,7 @@
     #stagewrap { flex: 0 1 62%; max-width: 62%; height: 100%; max-height: 100%; min-height: 0; align-items: flex-start; justify-content: center; }
     /* 幅を基準に 16:9 にする。高さ基準だと器の高さに引き伸ばされて比が崩れる */
     .stage { flex: none; width: 100%; height: auto; min-height: 0; }
-    #bTitle { flex: 1 1 auto; min-width: 0; }
-  /* タイトルの行: タイトル + 読み上げの切替(映像の下の帯は狭いので、ここに置く) */
-  #bTitleRow { display: flex; align-items: center; gap: 8px; align-self: stretch; max-width: 100%; }
-  #ttsBtn {
-    flex: none; width: 36px; height: 32px; padding: 0; font-size: 15px; line-height: 1;
-    background: #161b21; color: #8b96a3; border: 1px solid #2a323b; border-radius: 8px;
-    cursor: pointer; touch-action: manipulation;
-  }
-  #ttsBtn.on { background: rgba(46,207,142,.18); color: #2ecf8e; border-color: rgba(46,207,142,.45); }
+    #bTitle { align-self: stretch; max-width: 100%; }
     /* 62% + 260px だと 684px 未満の横画面ではみ出す。下限を下げて収める */
   #cmWrap { flex: 1 1 300px; min-width: 200px; }
   }
@@ -185,16 +173,33 @@
      コメントは重ねない(利用者の指示: オーバーレイ禁止はコメントのこと)。
      操作の帯だけは全画面でも使えるよう、映像の中に置く。 */
   /* 帯は映像の外。1段・36px。全画面でも残る(入れ物ごと全画面にするため) */
+  /* 帯: 上段=音量(名前と%つき)、下段=ボタン(文字つき)。絵文字は使わない */
   #vrow {
     position: static; z-index: auto; flex: none;
-    display: flex; align-items: center; gap: 6px;
-    min-height: 36px; padding: 4px 10px;
-    padding-bottom: max(4px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 6px 10px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
     background: #0d1116; border-top: 1px solid rgba(255,255,255,.10);
   }
-  #vrow .volgrp { flex: 1 1 0; min-width: 0; }
-  #vrow input[type=range] { width: 100%; }
-  #vrow button { flex: none; min-height: 28px; padding: 0 8px; font-size: 12px; }
+  .vrow-top { display: flex; gap: 10px; }
+  .volgrp { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
+  .volgrp label { flex: none; white-space: nowrap; font-size: 11px; color: #9aa4b0; }
+  .volgrp output { flex: none; min-width: 34px; text-align: right; white-space: nowrap; font-size: 11px; color: #c9d1d9; }
+  /* 細い線だと掴めないので、トラック6px・つまみ18px を描く */
+  .volgrp input[type=range] {
+    flex: 1 1 auto; min-width: 0; height: 26px;
+    -webkit-appearance: none; appearance: none; background: transparent;
+  }
+  .volgrp input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: #2a323b; }
+  .volgrp input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px; margin-top: -6px;
+    border-radius: 50%; background: #2ecf8e;
+  }
+  .volgrp input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: #2a323b; }
+  .volgrp input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: 0; border-radius: 50%; background: #2ecf8e; }
+  .vrow-btns { display: flex; gap: 6px; }
+  /* 狭い画面では1本1段にして、掴める幅を確保する */
+  @media (max-width: 360px){ .vrow-top { flex-direction: column; gap: 2px; } }
   /* 全画面: 入れ物ごと(実APIと疑似の両方)。カンマ連結にしない */
   #stagewrap:fullscreen { display: flex; flex-direction: column; background: #000; }
   #stagewrap:-webkit-full-screen { display: flex; flex-direction: column; background: #000; }
@@ -205,8 +210,9 @@
   #stagewrap:-webkit-full-screen .stage { flex: 1 1 auto; min-height: 0; }
   body.pfs #stagewrap .stage { flex: 1 1 auto; min-height: 0; }
   /* 帯の中のボタンは小さく。**同じセレクタを2か所に書かない**(後勝ちで寸法が戻る) */
-  #vrow #unmute, #vrow #fsBtn {
-    flex: none; min-height: 28px; padding: 0 8px; font: inherit; font-size: 12px;
+  /* 帯のボタンは**全部**同じ見た目(読み上げも含める) */
+  .vrow-btns button {
+    flex: 1 1 0; min-width: 0; min-height: 32px; padding: 0 8px; font: inherit; font-size: 12px;
     background: #161b21; color: #e6e8ea; border: 1px solid #2a323b; border-radius: 8px;
     cursor: pointer; touch-action: manipulation; white-space: nowrap;
   }
@@ -330,18 +336,28 @@
   </div>
     <!-- 操作の帯は**映像の外**(映像のすぐ下)に1段で置く。全画面は「入れ物ごと」なので帯も残る。 -->
     <div id="vrow">
-      <span class="volgrp"><input id="volDesk" type="range" min="0" max="100" value="30" aria-label="動画音声の音量" /></span>
-      <span class="volgrp"><input id="volMic" type="range" min="0" max="100" value="100" aria-label="配信者マイクの音量" /></span>
-      <button id="unmute" aria-pressed="false" aria-label="音声のオン・オフ">🔇<span class="sw">OFF</span></button>
-      <button id="fsBtn" aria-label="全画面表示">⛶</button>
+      <div class="vrow-top">
+        <span class="volgrp">
+          <label for="volDesk">動画</label>
+          <input id="volDesk" type="range" min="0" max="100" value="30" />
+          <output id="volDeskVal">30%</output>
+        </span>
+        <span class="volgrp">
+          <label for="volMic">マイク</label>
+          <input id="volMic" type="range" min="0" max="100" value="100" />
+          <output id="volMicVal">100%</output>
+        </span>
+      </div>
+      <div class="vrow-btns">
+        <button id="unmute" aria-pressed="false">全音声<span class="sw">OFF</span></button>
+        <button id="ttsBtn" aria-pressed="false">読み上げ<span class="sw">OFF</span></button>
+        <button id="fsBtn">全画面</button>
+      </div>
     </div>
     <!-- 配信タイトルは**映像に重ねない**。映像のすぐ下に1行で置く(オーバーレイ禁止はコメントのこと)。
          横画面では映像とコメントが左右に分かれるので、映像とタイトルは1つの器にまとめる
          (器に入れないと、タイトルが行方向のフレックス子になって縦いっぱいに伸びる)。 -->
-    <div id="bTitleRow">
-      <div id="bTitle"></div>
-      <button id="ttsBtn" aria-pressed="false" aria-label="コメントの読み上げ" title="コメントを読み上げる">🔊</button>
-    </div>
+    <div id="bTitle"></div>
   </div>
   <div id="cmWrap">
     <!-- P2Pが通らない回線を検出したときだけ出る。既定は非表示。 -->
@@ -498,7 +514,7 @@ if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(doc
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.26";
+const CLIENT_VERSION = "v0.7.27";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -1055,8 +1071,7 @@ function ttsEnqueue(name, text, skip){
 function ttsSetOn(on){
   ttsOn = !!on;
   try { localStorage.setItem(TTS_KEY, ttsOn ? "1" : "0"); } catch(e){}
-  const b = $("ttsBtn");
-  if (b){ b.classList.toggle("on", ttsOn); b.setAttribute("aria-pressed", ttsOn ? "true" : "false"); }
+  ttsPaint();                               // 表示はここに集約
   if (ttsOn){ ttsUnlock(); return; }
   ttsQueue.length = 0; ttsBusy = false; ttsCurrent = null;
   if (ttsStall){ clearTimeout(ttsStall); ttsStall = null; }
@@ -1138,6 +1153,10 @@ function volPref(key, defVal){
 }
 $("volDesk").value = volPref("dss_view_vol_desk", 30); // 既定: 動画30% / 配信者マイク100%(マイクを大きく)
 $("volMic").value  = volPref("dss_view_vol_mic", 100);
+// 復元した値で % を出し、音量にも1回反映する
+bindVol("volDesk", "volDeskVal");
+bindVol("volMic", "volMicVal");
+try { applyAudioGains(); } catch(e){ console.warn("音量の初期反映に失敗", e); }   // 黙って失敗させない
 
 function ensureAudioCtx(){
   if (actx) return actx;
@@ -1193,6 +1212,14 @@ function clearAudioNodes(){
   audioNodes.clear();
   audioMap = null;
 }
+// 数値の表示だけを足す(音量の反映は既存の input ハンドラが行う)
+function bindVol(id, outId){
+  const el = $(id), out = $(outId);
+  if (!el || !out){ console.warn("音量バーの要素が見つかりません", id, outId); return; }   // 綴り違いに気づけるように
+  const sync = () => { out.textContent = el.value + "%"; };
+  el.addEventListener("input", sync);
+  sync();
+}
 $("volDesk").addEventListener("input", () => { localStorage.setItem("dss_view_vol_desk", $("volDesk").value); applyAudioGains(); });
 $("volMic").addEventListener("input", () => { localStorage.setItem("dss_view_vol_mic", $("volMic").value); applyAudioGains(); });
 
@@ -1213,10 +1240,10 @@ $("unmute").onclick = () => {
 // 表示は「押すとどうなるか」ではなく**いまどうなっているか**で統一する。
 // 操作クライアント2種と同じ直し方(絵柄が状態、文言が動作を指していて逆を向いていた)。
 function setViewMuteLabel(){
-  const on = !masterMuted;
   const b = $("unmute");
-  b.innerHTML = (on ? "🔊" : "🔇") + ' 音声<span class="sw' + (on ? " on" : "") + '">' +
-                (on ? "ON" : "OFF") + '</span>';
+  if (!b) return;                       // 保険
+  const on = !masterMuted;
+  b.innerHTML = '全音声<span class="sw' + (on ? " on" : "") + '">' + (on ? "ON" : "OFF") + '</span>';
   b.setAttribute("aria-pressed", on ? "true" : "false");
   i18nApply(b);
 }
@@ -1271,12 +1298,18 @@ $("fsBtn").onclick = () => {
 $("fsExit").onclick = (e) => { e.stopPropagation(); exitFs(); };
 
 // 読み上げの初期状態と切替
+// 読み上げの札を描く(状態は札、操作は文言)
+function ttsPaint(){
+  const b = $("ttsBtn");
+  if (!b) return;
+  b.innerHTML = '読み上げ<span class="sw' + (ttsOn ? " on" : "") + '">' + (ttsOn ? "ON" : "OFF") + '</span>';
+  b.setAttribute("aria-pressed", ttsOn ? "true" : "false");
+}
 (function(){
   const b = $("ttsBtn");
   if (!b) return;
   if (!("speechSynthesis" in window)){ b.style.display = "none"; return; }
-  b.classList.toggle("on", ttsOn);
-  b.setAttribute("aria-pressed", ttsOn ? "true" : "false");
+  ttsPaint();
   b.onclick = () => ttsSetOn(!ttsOn);
 })();
 document.addEventListener("keydown", (e) => {
