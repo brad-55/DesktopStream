@@ -169,7 +169,15 @@
     #stagewrap { flex: 0 1 62%; max-width: 62%; height: 100%; max-height: 100%; min-height: 0; align-items: flex-start; justify-content: center; }
     /* 幅を基準に 16:9 にする。高さ基準だと器の高さに引き伸ばされて比が崩れる */
     .stage { flex: none; width: 100%; height: auto; min-height: 0; }
-    #bTitle { align-self: stretch; max-width: 100%; }
+    #bTitle { flex: 1 1 auto; min-width: 0; }
+  /* タイトルの行: タイトル + 読み上げの切替(映像の下の帯は狭いので、ここに置く) */
+  #bTitleRow { display: flex; align-items: center; gap: 8px; align-self: stretch; max-width: 100%; }
+  #ttsBtn {
+    flex: none; width: 36px; height: 32px; padding: 0; font-size: 15px; line-height: 1;
+    background: #161b21; color: #8b96a3; border: 1px solid #2a323b; border-radius: 8px;
+    cursor: pointer; touch-action: manipulation;
+  }
+  #ttsBtn.on { background: rgba(46,207,142,.18); color: #2ecf8e; border-color: rgba(46,207,142,.45); }
     /* 62% + 260px だと 684px 未満の横画面ではみ出す。下限を下げて収める */
   #cmWrap { flex: 1 1 300px; min-width: 200px; }
   }
@@ -330,7 +338,10 @@
     <!-- 配信タイトルは**映像に重ねない**。映像のすぐ下に1行で置く(オーバーレイ禁止はコメントのこと)。
          横画面では映像とコメントが左右に分かれるので、映像とタイトルは1つの器にまとめる
          (器に入れないと、タイトルが行方向のフレックス子になって縦いっぱいに伸びる)。 -->
-    <div id="bTitle"></div>
+    <div id="bTitleRow">
+      <div id="bTitle"></div>
+      <button id="ttsBtn" aria-pressed="false" aria-label="コメントの読み上げ" title="コメントを読み上げる">🔊</button>
+    </div>
   </div>
   <div id="cmWrap">
     <!-- P2Pが通らない回線を検出したときだけ出る。既定は非表示。 -->
@@ -487,7 +498,7 @@ if (LANG === "en"){ document.documentElement.lang = "en"; document.title = T(doc
 // 別々に古くなりうる。不具合報告を受けたとき、どれが古いのかを切り分けるために出す。
 // 操作クライアント2種(web/index.html, ayame-client/client.html)の
 // CLIENT_VERSION とは**別に管理する**(こちらは更新頻度が低く、揃える意味がない)。
-const CLIENT_VERSION = "v0.7.23";
+const CLIENT_VERSION = "v0.7.26";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
@@ -822,7 +833,7 @@ async function startPeer(){
   dc.onclose = () => enableComment(false);
   dc.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch(e){ return; }
-    if (m.type === "comment") addComment(m.name, m.text, m.ts, m.color, m.icon, m.host);
+    if (m.type === "comment") addComment(m.name, m.text, m.ts, m.color, m.icon, m.host, true);
     if (m.type === "audiomap"){
       // 配信側からの「どのmidがマイク/PC音声か」の対応表
       audioMap = { mic: (m.mic != null ? String(m.mic) : null), desk: (m.desk != null ? String(m.desk) : null) };
@@ -965,7 +976,102 @@ function avatarEl(name, color, icon, host){
   }
   return av;
 }
-function addComment(name, text, ts, color, icon, host){
+// ---- コメントの読み上げ(この端末で鳴らす。配信には載せない) ----
+const TTS_KEY = "dss_tts", TTS_MAX = 50, TTS_STALL_MS = 30000;
+let ttsOn = localStorage.getItem(TTS_KEY) === "1";
+let ttsBusy = false, ttsCurrent = null, ttsVoice = null, ttsUnlocked = false, ttsUnlockU = null;
+let ttsStall = null;
+const ttsQueue = [];
+
+function ttsPickVoice(){
+  try {
+    const vs = speechSynthesis.getVoices() || [];
+    ttsVoice = vs.find((x) => /^ja(-|_)?/i.test(x.lang)) || null;
+  } catch(e){ ttsVoice = null; }
+}
+if ("speechSynthesis" in window){
+  ttsPickVoice();
+  try { speechSynthesis.addEventListener("voiceschanged", ttsPickVoice); } catch(e){}
+}
+// iPhone は「操作の中で1回鳴らす」必要がある。1回だけ、再生中は触らない。
+function ttsUnlock(){
+  if (!("speechSynthesis" in window) || ttsUnlocked) return;
+  try {
+    if (speechSynthesis.speaking){ ttsUnlocked = true; return; }
+    const u = new SpeechSynthesisUtterance("・");
+    u.volume = 0; ttsUnlockU = u;
+    u.onend = u.onerror = () => { if (ttsUnlockU === u) ttsUnlockU = null; };
+    speechSynthesis.speak(u);
+    ttsUnlocked = true;
+  } catch(e){}
+}
+// 60文字以内で、候補のうち**一番後ろ**で切る(記号は前の塊に残す)
+function ttsChunks(s){
+  const out = [];
+  let rest = String(s);
+  const marks = ["。", "、", "!", "?", "　", " "];
+  while (rest.length > 60){
+    let cut = -1;
+    for (const m of marks){
+      const i = rest.lastIndexOf(m, 60);
+      if (i > 20 && i + 1 > cut) cut = i + 1;
+    }
+    if (cut < 0) cut = 60;
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+function ttsFinish(hard){
+  ttsBusy = false; ttsCurrent = null;
+  if (ttsStall){ clearTimeout(ttsStall); ttsStall = null; }
+  if (hard){ try { speechSynthesis.cancel(); } catch(e){} }   // 詰まりを解く
+  ttsSpeakNext();
+}
+function ttsSpeakNext(){
+  if (!ttsOn || ttsBusy || !ttsQueue.length) return;
+  const item = ttsQueue.shift();
+  const u = new SpeechSynthesisUtterance(item.head + item.text);
+  if (ttsVoice){ try { u.voice = ttsVoice; } catch(e){ /* 端末によっては設定できない */ } }
+  u.lang = "ja-JP"; u.rate = 1.1;
+  ttsCurrent = u; ttsBusy = true;
+  u.onend = u.onerror = () => { if (ttsCurrent !== u) return; ttsFinish(false); };
+  if (ttsStall) clearTimeout(ttsStall);
+  ttsStall = setTimeout(() => { if (ttsCurrent === u) ttsFinish(true); }, TTS_STALL_MS);
+  try { speechSynthesis.speak(u); }
+  catch(e){ if (ttsCurrent === u) ttsFinish(false); }
+}
+function ttsEnqueue(name, text, skip){
+  const t = String(text || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+  if (skip || !t || !("speechSynthesis" in window) || !ttsOn) return;
+  const head = String(name || "").slice(0, 20);
+  ttsChunks(t.slice(0, 120)).forEach((piece, i) => {
+    ttsQueue.push({ head: i === 0 && head ? head + "、" : "", text: piece });
+  });
+  while (ttsQueue.length > TTS_MAX) ttsQueue.shift();
+  ttsSpeakNext();
+}
+function ttsSetOn(on){
+  ttsOn = !!on;
+  try { localStorage.setItem(TTS_KEY, ttsOn ? "1" : "0"); } catch(e){}
+  const b = $("ttsBtn");
+  if (b){ b.classList.toggle("on", ttsOn); b.setAttribute("aria-pressed", ttsOn ? "true" : "false"); }
+  if (ttsOn){ ttsUnlock(); return; }
+  ttsQueue.length = 0; ttsBusy = false; ttsCurrent = null;
+  if (ttsStall){ clearTimeout(ttsStall); ttsStall = null; }
+  try { speechSynthesis.cancel(); } catch(e){}
+}
+// 自分の名前(自分の発言は読まない)
+function ttsMyName(){
+  try {
+    const el = $("cmName");
+    if (el && el.value.trim()) return el.value.trim().slice(0, 20);
+  } catch(e){}
+  try { return (localStorage.getItem("dss_view_name") || "").slice(0, 20); } catch(e){ return ""; }
+}
+
+function addComment(name, text, ts, color, icon, host, live){
   name = String(name || T("名無し")).slice(0, 20);
   text = String(text || "").slice(0, 200);
   if (!text.trim()) return;
@@ -985,6 +1091,8 @@ function addComment(name, text, ts, color, icon, host){
   // 過去のコメントを読もうとスクロールを下げている最中に誰かが発言すると、
   // そのたび先頭へ引き戻されて読めなくなる(視聴者が多いほど頻発する)。
   // 判定は挿入の前に行う(挿入後はスクロール位置が動きうるため)。
+  // 読み上げは**受信した時だけ**(履歴の復元では読まない)。自分とシステム行は読まない
+  if (live) ttsEnqueue(name, text, name === ttsMyName());   // 自分の発言は読まない(host は読む)
   const atTop = box.scrollTop < 40;
   // 読書位置を保つために必要なのは「先頭に足した高さ」**だけ**。
   // 下端を剪定して縮んだ分は、読んでいる行の位置を動かさないので差し引かない。
@@ -1161,6 +1269,16 @@ $("fsBtn").onclick = () => {
   if (!canElFs && !canVideoFs) b.style.display = "none";
 })();
 $("fsExit").onclick = (e) => { e.stopPropagation(); exitFs(); };
+
+// 読み上げの初期状態と切替
+(function(){
+  const b = $("ttsBtn");
+  if (!b) return;
+  if (!("speechSynthesis" in window)){ b.style.display = "none"; return; }
+  b.classList.toggle("on", ttsOn);
+  b.setAttribute("aria-pressed", ttsOn ? "true" : "false");
+  b.onclick = () => ttsSetOn(!ttsOn);
+})();
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !document.body.classList.contains("pfs")) return;
   const t = e.target;

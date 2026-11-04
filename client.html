@@ -956,6 +956,7 @@
       <button id="ovMute" aria-pressed="false">🔇 音声<span class="sw">OFF</span></button>
       <button id="ovFs" aria-label="全画面切り替え">⛶</button>
     </div>
+        <span id="rsMicHint" class="hintline" role="status" aria-live="polite" style="display:none"></span>
     <button id="zoomReset">1×に戻す</button>
     <div id="fwheel" title="ドラッグでスクロール"><div id="fwThumb"></div></div>
   </div>
@@ -1176,6 +1177,13 @@
     </div>
 
     <div class="tabpage" id="tab-settings">
+      <div class="setting-card">
+        <span class="sc-label">コメントの読み上げ</span>
+        <span class="sc-desc">届いたコメントをこの端末で読み上げます(配信には載りません)</span>
+        <div class="sc-row">
+          <button id="ttsBtn" class="rsc-tgl" aria-pressed="false">🔊 読み上げ<span class="sw">OFF</span></button>
+        </div>
+      </div>
       <div class="setting-card">
         <!-- 両方の言語で読めるよう併記する(訳さない) -->
         <span class="sc-label" data-noi18n>言語 / Language</span>
@@ -4502,6 +4510,92 @@ function rsWireComment(slot, ch){
     rsRelayAll(c);
   };
 }
+// ---- コメントの読み上げ(この端末で鳴らす。配信には載せない) ----
+const TTS_KEY = "dss_tts", TTS_MAX = 50, TTS_STALL_MS = 30000;
+let ttsOn = localStorage.getItem(TTS_KEY) === "1";
+let ttsBusy = false, ttsCurrent = null, ttsVoice = null, ttsUnlocked = false, ttsUnlockU = null;
+let ttsStall = null;
+const ttsQueue = [];
+
+function ttsPickVoice(){
+  try {
+    const vs = speechSynthesis.getVoices() || [];
+    ttsVoice = vs.find((x) => /^ja(-|_)?/i.test(x.lang)) || null;
+  } catch(e){ ttsVoice = null; }
+}
+if ("speechSynthesis" in window){
+  ttsPickVoice();
+  try { speechSynthesis.addEventListener("voiceschanged", ttsPickVoice); } catch(e){}
+}
+// iPhone は「操作の中で1回鳴らす」必要がある。1回だけ、再生中は触らない。
+function ttsUnlock(){
+  if (!("speechSynthesis" in window) || ttsUnlocked) return;
+  try {
+    if (speechSynthesis.speaking){ ttsUnlocked = true; return; }
+    const u = new SpeechSynthesisUtterance("・");
+    u.volume = 0; ttsUnlockU = u;
+    u.onend = u.onerror = () => { if (ttsUnlockU === u) ttsUnlockU = null; };
+    speechSynthesis.speak(u);
+    ttsUnlocked = true;
+  } catch(e){}
+}
+// 60文字以内で、候補のうち**一番後ろ**で切る(記号は前の塊に残す)
+function ttsChunks(s){
+  const out = [];
+  let rest = String(s);
+  const marks = ["。", "、", "!", "?", "　", " "];
+  while (rest.length > 60){
+    let cut = -1;
+    for (const m of marks){
+      const i = rest.lastIndexOf(m, 60);
+      if (i > 20 && i + 1 > cut) cut = i + 1;
+    }
+    if (cut < 0) cut = 60;
+    out.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+function ttsFinish(hard){
+  ttsBusy = false; ttsCurrent = null;
+  if (ttsStall){ clearTimeout(ttsStall); ttsStall = null; }
+  if (hard){ try { speechSynthesis.cancel(); } catch(e){} }   // 詰まりを解く
+  ttsSpeakNext();
+}
+function ttsSpeakNext(){
+  if (!ttsOn || ttsBusy || !ttsQueue.length) return;
+  const item = ttsQueue.shift();
+  const u = new SpeechSynthesisUtterance(item.head + item.text);
+  if (ttsVoice){ try { u.voice = ttsVoice; } catch(e){ /* 端末によっては設定できない */ } }
+  u.lang = "ja-JP"; u.rate = 1.1;
+  ttsCurrent = u; ttsBusy = true;
+  u.onend = u.onerror = () => { if (ttsCurrent !== u) return; ttsFinish(false); };
+  if (ttsStall) clearTimeout(ttsStall);
+  ttsStall = setTimeout(() => { if (ttsCurrent === u) ttsFinish(true); }, TTS_STALL_MS);
+  try { speechSynthesis.speak(u); }
+  catch(e){ if (ttsCurrent === u) ttsFinish(false); }
+}
+function ttsEnqueue(name, text, skip){
+  const t = String(text || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+  if (skip || !t || !("speechSynthesis" in window) || !ttsOn) return;
+  const head = String(name || "").slice(0, 20);
+  ttsChunks(t.slice(0, 120)).forEach((piece, i) => {
+    ttsQueue.push({ head: i === 0 && head ? head + "、" : "", text: piece });
+  });
+  while (ttsQueue.length > TTS_MAX) ttsQueue.shift();
+  ttsSpeakNext();
+}
+function ttsSetOn(on){
+  ttsOn = !!on;
+  try { localStorage.setItem(TTS_KEY, ttsOn ? "1" : "0"); } catch(e){}
+  const b = $("ttsBtn");
+  if (b){ b.classList.toggle("on", ttsOn); b.setAttribute("aria-pressed", ttsOn ? "true" : "false"); }
+  if (ttsOn){ ttsUnlock(); return; }
+  ttsQueue.length = 0; ttsBusy = false; ttsCurrent = null;
+  if (ttsStall){ clearTimeout(ttsStall); ttsStall = null; }
+  try { speechSynthesis.cancel(); } catch(e){}
+}
 function rsAddComment(c, roomNo){
   const box = $("rsComments");
   const div = document.createElement("div");
@@ -4516,6 +4610,7 @@ function rsAddComment(c, roomNo){
   div.appendChild(head); div.appendChild(body);
   // 端末にも残す(停止・終了後も書き出せるように)
   rsSaveComment({ ts: c.ts, name: c.name, text: c.text, color: c.color, room: roomNo });
+  ttsEnqueue(c.name, c.text, !!c.mine || !!c.system);   // 自分の発言・システム行は読まない
   rsRefreshHistCount();
   // 先頭付近を見ているときだけ最新へ追従する。
   //
@@ -4627,42 +4722,95 @@ function rsRenderRoster(){
 }
 
 // ---- 開始/停止とUI ----
-// マイクを取得する。rsStartのほか、バックグラウンド復帰でOSにマイクを
-// 止められた場合の再取得(rsReacquireVideo)からも呼ばれる。
+// ---- マイクの取得(iOS でも通るように段階的に落とす) ----
+// 取得に失敗しても**ボタンは押せるまま**にして、押した時にその場で取りに行く。
+// iOS は「操作の中で getUserMedia」でないと許可されないため。
+let rsMicLastError = "", rsMicOsMute = false;
+
+function rsDropMicStream(){
+  if (!rsMicStream) return;
+  rsMicStream.getTracks().forEach((t) => {
+    t.onended = null; t.onmute = null; t.onunmute = null;   // 捨てる時に誤って「止まりました」を出さない
+    try { t.stop(); } catch(e){}
+  });
+  rsMicStream = null;
+}
+
+function rsWireMicTrack(t){
+  t.onmute = () => { rsMicOsMute = true; rsShowMicState(); };
+  t.onunmute = () => { rsMicOsMute = false; rsShowMicState(); };
+  t.onended = () => {
+    if (rsMicTrack !== t) return;              // 古いトラックの通知は無視
+    rsMicTrack = null; rsMicOsMute = false;
+    rsShowMicState();
+    rsLog("マイクが止まりました。もう一度 ON にしてください");
+  };
+}
+
+// 「取得できていない」「OSに止められている」「使える」を区別して見せる
+function rsShowMicState(){
+  const b = $("rsMic");
+  if (!b) return;
+  const hint = $("rsMicHint");
+  if (hint){
+    if (!rsMicTrack && rsMicLastError){
+      hint.style.display = "";
+      hint.textContent = "マイクを使えません(" + rsMicLastError + ")。🎙 を押すともう一度試します";
+    } else if (rsMicOsMute){
+      hint.style.display = "";
+      hint.textContent = "OSにマイクを止められています。🎙 を押すと取り直します";
+    } else {
+      hint.style.display = "none";
+      hint.textContent = "";
+    }
+  }
+  const usable = !!rsMicTrack && !rsMicOsMute;
+  rsSetToggle(b, usable && !rsMuted);
+  b.disabled = false;                          // ★ 取得できていなくても押せる(押したら取りに行く)
+  b.title = !rsMicTrack ? (rsMicLastError || "マイクを取得できていません")
+          : rsMicOsMute ? "OSに止められています(もう一度 ON にしてください)"
+          : "";
+}
+
 async function rsAcquireMic(){
   rsMicTrack = null;
   if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
-    rsLog("この接続ではマイクを使えません(HTTPSまたはlocalhostが必要)。映像のみで配信します");
+    rsMicLastError = "この接続ではマイクを使えません(HTTPSで開いてください)";
+    rsLog(rsMicLastError);
+    rsShowMicState();
     return;
   }
+  // iOS は先に「録音あり」を宣言しないと音が通らないことがある(未対応環境では何もしない)
   try {
-    if (rsMicStream){ rsMicStream.getTracks().forEach(t => t.stop()); rsMicStream = null; }
-    // 【音質ポリシー】このプロジェクトの音声はオリジナル音質のまま処理する。
-    // 音声加工(ハイパスフィルター含む)を明示的に無効化して、素のマイク音を配信する。
-    // Android Chrome等のハイパスフィルターは音声処理チェーン(EC/NS/AGC)の一部として
-    // 働くため、3つとも無効にすることで処理チェーンごとバイパスさせる。goog系は
-    // 旧実装向けの独自キーで、非対応ブラウザでは単に無視される。
-    rsMicStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        voiceIsolation: false,
-        channelCount: { ideal: 2 },   // ステレオ対応マイクならステレオで取得
-        sampleRate: { ideal: 48000 },
-        googHighpassFilter: false,
-        googEchoCancellation: false,
-        googNoiseSuppression: false,
-        googAutoGainControl: false,
-        googTypingNoiseDetection: false, // タイピングノイズ検出も無効(音を欠落させない)
-        googAudioMirroring: false,
-      },
-    });
-    rsMicTrack = rsMicStream.getAudioTracks()[0];
-    // エンコーダにも「音楽」ヒントを与え、音声向けの帯域カット等を避ける
-    try { rsMicTrack.contentHint = "music"; } catch(e){}
-    rsMicTrack.enabled = !rsMuted;
-  } catch(e){ rsLog("マイクを取得できません(映像のみで配信):", e.name || e); }
+    if (navigator.audioSession && navigator.audioSession.type !== "play-and-record"){
+      navigator.audioSession.type = "play-and-record";
+    }
+  } catch(e){}
+  // 制約の強い順 → 弱い順。最初に通ったものを使う
+  const tries = [
+    { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+               channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 } } },
+    { audio: { channelCount: 1 } },
+    { audio: true },
+  ];
+  let last = null;
+  for (const c of tries){
+    try {
+      rsDropMicStream();
+      rsMicStream = await navigator.mediaDevices.getUserMedia(c);
+      rsMicTrack = rsMicStream.getAudioTracks()[0];
+      try { rsMicTrack.contentHint = "music"; } catch(e){}
+      rsMicTrack.enabled = !rsMuted;
+      rsWireMicTrack(rsMicTrack);
+      rsMicLastError = "";
+      rsShowMicState();
+      return;
+    } catch(e){ last = e; }
+  }
+  const nm = (last && last.name) ? last.name : "取得できません";
+  rsMicLastError = nm;
+  rsLog("マイクを取得できません(映像のみで配信):", nm);
+  rsShowMicState();
 }
 
 async function rsStart(){
@@ -4704,8 +4852,7 @@ async function rsStart(){
   $("rsToggle").textContent = T("⏹ 配信を停止");
   rsShowState();
   $("rsDot").classList.add("on");
-  $("rsMic").disabled = !rsMicTrack;
-  rsSetToggle($("rsMic"), !rsMuted && !!rsMicTrack);
+  rsShowMicState();
   rsUpdateDeskAudioBtn();
   $("rsRooms").disabled = true;
   $("rsCap").textContent = rooms;
@@ -4796,14 +4943,38 @@ $("rsHistClear").onclick = () => {
 rsRefreshHistCount();
 // 読み込み直したときにも件数を出す(上の呼び出しは要素より先に走ることがある)
 window.addEventListener("load", rsRefreshHistCount);
+// 読み上げの切替(未対応のブラウザでは出さない)
+(function(){
+  const b = $("ttsBtn");
+  if (!b) return;
+  if (!("speechSynthesis" in window)){ b.style.display = "none"; return; }
+  rsSetToggle(b, ttsOn);
+  b.setAttribute("aria-pressed", ttsOn ? "true" : "false");
+  b.onclick = () => ttsSetOn(!ttsOn);
+})();
 $("rsToggle").onclick = () => {
   if (!rsOn) rsCloseCrop();            // 配信を始めるときは暗幕を残さない
   if (rsOn) rsStop(); else rsStart();
 };
-$("rsMic").onclick = () => {
+$("rsMic").onclick = async () => {
+  // 取得できていなければ、この操作の中で取りに行く(iOS は操作が要る)
+  if (!rsMicTrack){
+    await rsAcquireMic();
+    rsMuted = false;
+    if (rsMicTrack && rsOn){
+      for (const slot of rsSlots){
+        if (!slot || !slot.pc) continue;
+        try { const sn = slot.pc.getSenders().find((x) => x.track && x.track.kind === "audio" && x.__mic); if (sn) await sn.replaceTrack(rsMicTrack); } catch(e){}
+        try { rsSendAudioMap(slot); } catch(e){}
+      }
+    }
+    rsShowMicState();
+    return;
+  }
   rsMuted = !rsMuted;
-  if (rsMicTrack) rsMicTrack.enabled = !rsMuted; // マイクは独立トラックなので enabled で即消音
+  rsMicTrack.enabled = !rsMuted;
   rsSetToggle($("rsMic"), !rsMuted);
+  rsShowMicState();
 };
 $("rsRooms").addEventListener("input", () => { if (!rsOn) rsShowShareUrl(); });
 $("rsSource").addEventListener("change", () => {
@@ -5711,7 +5882,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.25";
+const CLIENT_VERSION = "v0.7.26";
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
