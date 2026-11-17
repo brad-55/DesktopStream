@@ -1189,6 +1189,7 @@
           <input id="bcText" type="text" maxlength="200" placeholder="配信者としてコメント" />
           <button id="bcSend">送信</button>
         </div>
+        <div class="hintline" id="ttsHint">届いたコメントをこの端末で読み上げます(配信には載りません)</div>
         <div class="controls" id="ttsRow">
           <button data-tts-btn aria-pressed="false">読み上げ<span class="sw">OFF</span></button>
           <span class="fld-inline">
@@ -1202,13 +1203,6 @@
     </div>
 
     <div class="tabpage" id="tab-settings">
-      <div class="setting-card">
-        <span class="sc-label">コメントの読み上げ</span>
-        <span class="sc-desc">届いたコメントをこの端末で読み上げます(配信には載りません)</span>
-        <div class="sc-row">
-          <button data-tts-btn class="rsc-tgl" aria-pressed="false">読み上げ<span class="sw">OFF</span></button>
-        </div>
-      </div>
       <div class="setting-card">
         <!-- 両方の言語で読めるよう併記する(訳さない) -->
         <span class="sc-label" data-noi18n>言語 / Language</span>
@@ -6124,7 +6118,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.28";
+const CLIENT_VERSION = "v0.7.29";
 
 // ---- 端末のローカルDB(コメント・過去の静止画) ----
 // 画像は localStorage に置けないので IndexedDB を使う。
