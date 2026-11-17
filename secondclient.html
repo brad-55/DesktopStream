@@ -182,6 +182,7 @@
     background: #0d1116; border-top: 1px solid rgba(255,255,255,.10);
   }
   .vrow-top { display: flex; gap: 10px; }
+  .vrow-vol { display: flex; }
   .volgrp { display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; }
   .volgrp label { flex: none; white-space: nowrap; font-size: 11px; color: #9aa4b0; }
   .volgrp output { flex: none; min-width: 34px; text-align: right; white-space: nowrap; font-size: 11px; color: #c9d1d9; }
@@ -346,6 +347,13 @@
           <label for="volMic">マイク</label>
           <input id="volMic" type="range" min="0" max="100" value="100" />
           <output id="volMicVal">100%</output>
+        </span>
+      </div>
+      <div class="vrow-vol">
+        <span class="volgrp">
+          <label for="volTts">読み上げ</label>
+          <input id="volTts" type="range" min="0" max="100" value="100" />
+          <output id="volTtsVal">100%</output>
         </span>
       </div>
       <div class="vrow-btns">
@@ -995,6 +1003,11 @@ function avatarEl(name, color, icon, host){
 // ---- コメントの読み上げ(この端末で鳴らす。配信には載せない) ----
 const TTS_KEY = "dss_tts", TTS_MAX = 50, TTS_STALL_MS = 30000;
 let ttsOn = localStorage.getItem(TTS_KEY) === "1";
+let ttsVol = 1;                        // 0..1
+try {
+  const tv = localStorage.getItem("dss_view_vol_tts");
+  if (tv !== null){ const n = parseInt(tv, 10); if (Number.isFinite(n)) ttsVol = Math.max(0, Math.min(100, n)) / 100; }
+} catch(e){}
 let ttsBusy = false, ttsCurrent = null, ttsVoice = null, ttsUnlocked = false, ttsUnlockU = null;
 let ttsStall = null;
 const ttsQueue = [];
@@ -1051,6 +1064,7 @@ function ttsSpeakNext(){
   const u = new SpeechSynthesisUtterance(item.head + item.text);
   if (ttsVoice){ try { u.voice = ttsVoice; } catch(e){ /* 端末によっては設定できない */ } }
   u.lang = "ja-JP"; u.rate = 1.1;
+  u.volume = ttsVol;
   ttsCurrent = u; ttsBusy = true;
   u.onend = u.onerror = () => { if (ttsCurrent !== u) return; ttsFinish(false); };
   if (ttsStall) clearTimeout(ttsStall);
@@ -1060,7 +1074,7 @@ function ttsSpeakNext(){
 }
 function ttsEnqueue(name, text, skip){
   const t = String(text || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
-  if (skip || !t || !("speechSynthesis" in window) || !ttsOn) return;
+  if (skip || !t || !("speechSynthesis" in window) || !ttsOn || ttsVol <= 0) return;   // 0 のときは溜めない
   const head = String(name || "").slice(0, 20);
   ttsChunks(t.slice(0, 120)).forEach((piece, i) => {
     ttsQueue.push({ head: i === 0 && head ? head + "、" : "", text: piece });
@@ -1157,6 +1171,19 @@ $("volMic").value  = volPref("dss_view_vol_mic", 100);
 bindVol("volDesk", "volDeskVal");
 bindVol("volMic", "volMicVal");
 try { applyAudioGains(); } catch(e){ console.warn("音量の初期反映に失敗", e); }   // 黙って失敗させない
+// 読み上げの音量(端末に保存)
+(function(){
+  const el = $("volTts");
+  if (!el) return;
+  el.value = String(Math.round(ttsVol * 100));
+  const out = $("volTtsVal");
+  if (out) out.textContent = el.value + "%";
+  el.addEventListener("input", () => {
+    ttsVol = Math.max(0, Math.min(100, parseInt(el.value, 10) || 0)) / 100;
+    if (out) out.textContent = el.value + "%";
+    try { localStorage.setItem("dss_view_vol_tts", el.value); } catch(e){}
+  });
+})();
 
 function ensureAudioCtx(){
   if (actx) return actx;
@@ -1222,6 +1249,37 @@ function bindVol(id, outId){
 }
 $("volDesk").addEventListener("input", () => { localStorage.setItem("dss_view_vol_desk", $("volDesk").value); applyAudioGains(); });
 $("volMic").addEventListener("input", () => { localStorage.setItem("dss_view_vol_mic", $("volMic").value); applyAudioGains(); });
+
+// 受信後に鳴らしてみる。断られたら「次のタップで解除」を1つだけ構える
+let unmuteArmed = false;
+async function tryUnmutedPlay(){
+  if (masterMuted) return;
+  try {
+    await video.play();
+  } catch(e){
+    masterMuted = true;
+    try { video.muted = true; } catch(e2){}
+    applyAudioGains(); setViewMuteLabel();
+    armUnmuteOnTap();
+  }
+}
+function armUnmuteOnTap(){
+  if (unmuteArmed) return;             // 二重に構えない
+  unmuteArmed = true;
+  const once2 = () => {
+    document.removeEventListener("pointerdown", once2, true);
+    unmuteArmed = false;
+    try {
+      const a = ensureAudioCtx();
+      if (a && a.state === "suspended") a.resume();
+      masterMuted = false;
+      video.muted = audioNodes.size > 0;
+      applyAudioGains(); setViewMuteLabel();
+      video.play().catch(() => { masterMuted = true; applyAudioGains(); setViewMuteLabel(); armUnmuteOnTap(); });
+    } catch(e){ masterMuted = true; applyAudioGains(); setViewMuteLabel(); }
+  };
+  document.addEventListener("pointerdown", once2, true);
+}
 
 // ---- 音声ON(自動再生制限のためミュートで開始) ----
 $("unmute").onclick = () => {
@@ -1391,6 +1449,15 @@ function showGate(title, needPass){
 // 名前が保存済みならすぐ視聴開始。未入力ならゲートで入力を求める。
 // 合言葉不一致で戻された場合は showGate(…, true) で合言葉欄つきで再表示される。
 $("ngGo").onclick = () => {
+  // 【自動再生】この操作の中で解錠する。あと(通信の後)では権限が切れている。
+  try {
+    masterMuted = false;
+    const a = ensureAudioCtx();
+    if (a && a.state === "suspended") a.resume();
+    video.muted = audioNodes.size > 0 ? false : false;   // Web Audio 経由でも直接でも鳴らす
+    applyAudioGains();
+    setViewMuteLabel();
+  } catch(e){}
   const n = $("ngName").value.trim().slice(0, 20);
   if (!n){ $("ngName").focus(); return; }
   localStorage.setItem("dss_view_name", n);

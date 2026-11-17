@@ -573,6 +573,15 @@
   .rs-viewer > button { flex: none; }
   .rs-viewer.rs-cur { background: #2f4a38; color: var(--label); } /* color-mix 未対応環境向け */
   .rs-viewer.rs-cur { background: color-mix(in srgb, var(--tint) 22%, var(--bg-3)); }
+  /* 過去の静止画: サムネイルの一覧 */
+  .rs-imghist { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; }
+  .rs-imghist-item {
+    flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 4px; background: var(--bg-2); border: .5px solid var(--separator);
+    border-radius: 8px; color: var(--label-2); font-size: 10px; cursor: pointer;
+    min-height: 44px;                      /* 押しやすい大きさ */
+  }
+  .rs-imghist-item img { width: 64px; height: 40px; object-fit: cover; border-radius: 4px; background: #000; }
   #rsRoster, #rsComments {
     background: var(--bg); border: .5px solid var(--separator);
     border-radius: var(--r-cell); padding: 10px 12px;
@@ -1120,6 +1129,14 @@
           </div>
           <div class="controls" id="rsImageRow" style="display:none">
             <input id="rsImageFile" type="file" accept="image/*" />
+            <button id="rsImgHistBtn" type="button" aria-expanded="false">過去の画像</button>
+          </div>
+          <div id="rsImgHistWrap" style="display:none">
+            <div class="hintline">押すと、その画像と前回の切り取り範囲に戻ります</div>
+            <div id="rsImgHist" class="rs-imghist"></div>
+            <div class="controls">
+              <button id="rsImgHistClear" type="button">画像の履歴を消す</button>
+            </div>
           </div>
           <div id="rsCropWrap" style="display:none">
             <div class="hintline">枠をドラッグ/リサイズして切り取り範囲を調整(配信中は即時反映)</div>
@@ -1172,6 +1189,14 @@
           <input id="bcText" type="text" maxlength="200" placeholder="配信者としてコメント" />
           <button id="bcSend">送信</button>
         </div>
+        <div class="controls" id="ttsRow">
+          <button data-tts-btn aria-pressed="false">読み上げ<span class="sw">OFF</span></button>
+          <span class="fld-inline">
+            <label for="ttsVol">音量</label>
+            <input id="ttsVol" type="range" min="0" max="100" value="100" style="width:110px" />
+            <output id="ttsVolVal">100%</output>
+          </span>
+        </div>
         <div id="rsComments"></div>
       </div>
     </div>
@@ -1181,7 +1206,7 @@
         <span class="sc-label">コメントの読み上げ</span>
         <span class="sc-desc">届いたコメントをこの端末で読み上げます(配信には載りません)</span>
         <div class="sc-row">
-          <button id="ttsBtn" class="rsc-tgl" aria-pressed="false">🔊 読み上げ<span class="sw">OFF</span></button>
+          <button data-tts-btn class="rsc-tgl" aria-pressed="false">読み上げ<span class="sw">OFF</span></button>
         </div>
       </div>
       <div class="setting-card">
@@ -1324,6 +1349,17 @@
      https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js の中身で置き換える(インライン化)。 -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
+window.DSS_DB = {
+  handle: null,      // IndexedDB
+  ok: true,          // 使えるか
+  isReady: false,    // 読み込みが終わったか
+  ready: null,       // 完了を待つ Promise
+  comments: [],      // 画面と書き出しが見る(同期で読める)
+  images: [],        // 過去の静止画
+  pending: [],       // 読み込み前に来たコメントの退避
+  warned: false,
+};
+
 const $ = (id) => document.getElementById(id);
 // ================= 表示言語(英語対応) =================
 // 【ここに置く理由】読み込み時に通る処理が T() を呼ぶ。宣言より前に参照すると
@@ -4513,6 +4549,22 @@ function rsWireComment(slot, ch){
 // ---- コメントの読み上げ(この端末で鳴らす。配信には載せない) ----
 const TTS_KEY = "dss_tts", TTS_MAX = 50, TTS_STALL_MS = 30000;
 let ttsOn = localStorage.getItem(TTS_KEY) === "1";
+let ttsVol = 1;                        // 0..1
+try {
+  const tv = localStorage.getItem("dss_rs_vol_tts");
+  if (tv !== null){ const n = parseInt(tv, 10); if (Number.isFinite(n)) ttsVol = Math.max(0, Math.min(100, n)) / 100; }
+} catch(e){}
+// 2か所(設定タブ / コメントタブ)を同じ見た目にする
+function rsTtsPaint(){
+  document.querySelectorAll("[data-tts-btn]").forEach((b) => {
+    b.innerHTML = "読み上げ<span class=\"sw" + (ttsOn ? " on" : "") + "\">" + (ttsOn ? "ON" : "OFF") + "</span>";
+    b.setAttribute("aria-pressed", ttsOn ? "true" : "false");
+  });
+  const sl = $("ttsVol");
+  if (sl) sl.value = String(Math.round(ttsVol * 100));
+  const out = $("ttsVolVal");
+  if (out) out.textContent = Math.round(ttsVol * 100) + "%";
+}
 let ttsBusy = false, ttsCurrent = null, ttsVoice = null, ttsUnlocked = false, ttsUnlockU = null;
 let ttsStall = null;
 const ttsQueue = [];
@@ -4568,7 +4620,7 @@ function ttsSpeakNext(){
   const item = ttsQueue.shift();
   const u = new SpeechSynthesisUtterance(item.head + item.text);
   if (ttsVoice){ try { u.voice = ttsVoice; } catch(e){ /* 端末によっては設定できない */ } }
-  u.lang = "ja-JP"; u.rate = 1.1;
+  u.lang = "ja-JP"; u.rate = 1.1; u.volume = ttsVol;
   ttsCurrent = u; ttsBusy = true;
   u.onend = u.onerror = () => { if (ttsCurrent !== u) return; ttsFinish(false); };
   if (ttsStall) clearTimeout(ttsStall);
@@ -4583,14 +4635,14 @@ function ttsEnqueue(name, text, skip){
   ttsChunks(t.slice(0, 120)).forEach((piece, i) => {
     ttsQueue.push({ head: i === 0 && head ? head + "、" : "", text: piece });
   });
+  if (ttsVol <= 0) return;             // 音量0のときは溜めない
   while (ttsQueue.length > TTS_MAX) ttsQueue.shift();
   ttsSpeakNext();
 }
 function ttsSetOn(on){
   ttsOn = !!on;
   try { localStorage.setItem(TTS_KEY, ttsOn ? "1" : "0"); } catch(e){}
-  const b = $("ttsBtn");
-  if (b){ b.classList.toggle("on", ttsOn); b.setAttribute("aria-pressed", ttsOn ? "true" : "false"); }
+  rsTtsPaint();
   if (ttsOn){ ttsUnlock(); return; }
   ttsQueue.length = 0; ttsBusy = false; ttsCurrent = null;
   if (ttsStall){ clearTimeout(ttsStall); ttsStall = null; }
@@ -4936,21 +4988,28 @@ $("rsCropOpen").onclick = () => {
 $("rsHistExport").onclick = () => { rsExportComments(); };
 $("rsHistClear").onclick = () => {
   if (!confirm("保存しているコメント履歴を消します。よろしいですか?")) return;
-  try { localStorage.removeItem(RS_COMMENTS_KEY); } catch(e){}
-  rsRefreshHistCount();
+  rsClearHistory();
   rsLog("コメント履歴を消しました");
 };
 rsRefreshHistCount();
 // 読み込み直したときにも件数を出す(上の呼び出しは要素より先に走ることがある)
 window.addEventListener("load", rsRefreshHistCount);
-// 読み上げの切替(未対応のブラウザでは出さない)
+// 読み上げの切替(未対応のブラウザでは出さない)。2か所を同じ関数で描く
 (function(){
-  const b = $("ttsBtn");
-  if (!b) return;
-  if (!("speechSynthesis" in window)){ b.style.display = "none"; return; }
-  rsSetToggle(b, ttsOn);
-  b.setAttribute("aria-pressed", ttsOn ? "true" : "false");
-  b.onclick = () => ttsSetOn(!ttsOn);
+  const btns = document.querySelectorAll("[data-tts-btn]");
+  if (!btns.length) return;
+  if (!("speechSynthesis" in window)){ btns.forEach((b) => { b.style.display = "none"; }); return; }
+  rsTtsPaint();
+  btns.forEach((b) => { b.onclick = () => ttsSetOn(!ttsOn); });
+  const sl = $("ttsVol");
+  if (sl){
+    sl.addEventListener("input", () => {
+      ttsVol = Math.max(0, Math.min(100, parseInt(sl.value, 10) || 0)) / 100;
+      const out = $("ttsVolVal");
+      if (out) out.textContent = sl.value + "%";
+      try { localStorage.setItem("dss_rs_vol_tts", sl.value); } catch(e){}
+    });
+  }
 })();
 $("rsToggle").onclick = () => {
   if (!rsOn) rsCloseCrop();            // 配信を始めるときは暗幕を残さない
@@ -4982,6 +5041,22 @@ $("rsSource").addEventListener("change", () => {
   if (rsOn) rsShowState();   // 配信中の切替に状態表示を追随させる(表示が嘘にならないように)
 });
 $("rsSource").addEventListener("change", rsSwitchSource);
+(function(){
+  const btn = $("rsImgHistBtn"), wrap = $("rsImgHistWrap");
+  if (!btn || !wrap) return;
+  btn.onclick = () => {
+    const on = wrap.style.display === "none";
+    wrap.style.display = on ? "" : "none";
+    btn.setAttribute("aria-expanded", on ? "true" : "false");
+    if (on) rsRenderImgHist();
+  };
+  const clr = $("rsImgHistClear");
+  if (clr) clr.onclick = () => {
+    if (!confirm("残している画像の履歴を消します。よろしいですか?")) return;
+    rsClearImageHistory();
+    rsLog("画像の履歴を消しました");
+  };
+})();
 $("rsImageFile").addEventListener("change", (e) => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
@@ -4991,9 +5066,72 @@ $("rsImageFile").addEventListener("change", (e) => {
     rsCropRect = { x: 0, y: 0, w: 1, h: 1 };
     rsSetupCrop();       // クロップUIを表示
     if (rsCanvas) rsDrawImage();
+    rsImageRemember(f);  // 過去の画像として残す
   };
   img.src = URL.createObjectURL(f);
 });
+
+// ---- 過去の静止画 ----
+// 選んだ画像を Blob のまま残す(切り取り範囲も一緒に)。最大10枚・1枚4MBまで。
+function rsImageRemember(file){
+  if (!file) return;
+  if (file.size > RS_IMAGE_MAX_BYTES){
+    rsLog("画像が大きすぎるため残せません(4MBまで)。配信にはこのまま使えます");
+    return;
+  }
+  if (!DSS_DB.isReady || !DSS_DB.ok){
+    rsLog("この環境では画像を残せません(ストレージが使えません)");
+    return;
+  }
+  const rec = { ts: Date.now(), name: String(file.name || "image"), blob: file, crop: Object.assign({}, rsCropRect) };
+  DSS_DB.images.push(rec);
+  while (DSS_DB.images.length > RS_IMAGES_MAX) DSS_DB.images.shift();
+  dbAdd("images", rec, RS_IMAGES_MAX, (err) => {
+    rsOnDbErr(err);
+    dbAll("images").then((rows) => { DSS_DB.images = rows; rsRenderImgHist(); }).catch(() => {});
+  });
+}
+function rsRenderImgHist(){
+  const box = $("rsImgHist");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!DSS_DB.images.length){
+    const e = document.createElement("span");
+    e.className = "hintline";
+    e.textContent = "まだありません";
+    box.appendChild(e);
+    return;
+  }
+  DSS_DB.images.slice().reverse().forEach((rec) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rs-imghist-item";
+    b.title = rec.name + " / " + rsFmtTs(rec.ts);
+    const im = document.createElement("img");
+    try { im.src = URL.createObjectURL(rec.blob); } catch(e){}
+    im.alt = "";
+    const t = document.createElement("span");
+    t.textContent = rsFmtTs(rec.ts).slice(5, 16);
+    b.appendChild(im); b.appendChild(t);
+    b.onclick = () => {
+      const img = new Image();
+      img.onload = () => {
+        rsImageEl = img;
+        rsCropRect = rec.crop || { x: 0, y: 0, w: 1, h: 1 };
+        rsSetupCrop();
+        if (rsCanvas) rsDrawImage();
+        rsLog("過去の画像を使います: " + rec.name);
+      };
+      img.src = URL.createObjectURL(rec.blob);
+    };
+    box.appendChild(b);
+  });
+}
+function rsClearImageHistory(){
+  DSS_DB.images = [];
+  if (DSS_DB.handle) dbClear("images");
+  rsRenderImgHist();
+}
 
 // ---- 静止画クロップUI ----
 // ---- コメント履歴(端末に残す) ----
@@ -5001,27 +5139,131 @@ $("rsImageFile").addEventListener("change", (e) => {
 // 画面へは自動で戻さない(前の配信のコメントが混ざらないように)。
 const RS_KEEP_COMMENTS = 500;
 const RS_COMMENTS_KEY = "dss_rs_comment_hist";
-let rsSaveWarned = false;
-function rsLoadComments(){
-  try {
-    const a = JSON.parse(localStorage.getItem(RS_COMMENTS_KEY) || "[]");
-    return Array.isArray(a) ? a : [];
-  } catch(e){ return []; }
+const RS_LEGACY_MAX = 500;                    // 旧形式(localStorage)で残す件数
+const DB_NAME = "dss-rs", DB_VER = 1;
+const RS_COMMENTS_MAX = 2000;                 // 端末に残すコメント
+const RS_IMAGES_MAX = 10;                     // 残す静止画
+const RS_IMAGE_MAX_BYTES = 4 * 1024 * 1024;   // 1枚 4MB まで(切らずに断る)
+
+function dbOpen(){
+  return new Promise((ok, ng) => {
+    if (!window.indexedDB) return ng(new Error("no-idb"));
+    let r;
+    try { r = indexedDB.open(DB_NAME, DB_VER); } catch(e){ return ng(e); }
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains("comments")){
+        const st = db.createObjectStore("comments", { keyPath: "id", autoIncrement: true });
+        st.createIndex("ts", "ts");
+      }
+      if (!db.objectStoreNames.contains("images")) db.createObjectStore("images", { keyPath: "id", autoIncrement: true });
+    };
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => ng(r.error);
+  });
+}
+function dbAll(store){
+  return new Promise((ok, ng) => {
+    const tx = DSS_DB.handle.transaction(store, "readonly");
+    const rq = tx.objectStore(store).getAll();
+    rq.onsuccess = () => ok(rq.result || []);
+    rq.onerror = () => ng(rq.error);
+  });
+}
+function dbClear(store){
+  return new Promise((ok) => {
+    if (!DSS_DB.handle) return ok();
+    const tx = DSS_DB.handle.transaction(store, "readwrite");
+    tx.objectStore(store).clear();
+    tx.oncomplete = () => ok();
+    tx.onerror = () => ok();
+  });
+}
+// 追加して、**同じトランザクション**で上限を超えた分を古い順(id 昇順)に消す
+function dbAdd(store, rec, max, cb){
+  const tx = DSS_DB.handle.transaction(store, "readwrite");
+  const st = tx.objectStore(store);
+  st.add(rec);
+  st.count().onsuccess = (e) => {
+    let over = e.target.result - max;
+    if (over <= 0) return;
+    st.openCursor().onsuccess = (ev) => {
+      const cur = ev.target.result;
+      if (!cur || over <= 0) return;
+      cur.delete(); over--; cur.continue();
+    };
+  };
+  tx.oncomplete = () => cb && cb(null);
+  tx.onerror = () => cb && cb(tx.error);
+}
+function rsLegacyLoad(){
+  try { const a = JSON.parse(localStorage.getItem(RS_COMMENTS_KEY) || "[]"); return Array.isArray(a) ? a : []; }
+  catch(e){ return []; }
+}
+// DB が使えないときの退避(コメントだけ)
+function rsWriteThrough(){
+  try { localStorage.setItem(RS_COMMENTS_KEY, JSON.stringify(DSS_DB.comments.slice(-RS_LEGACY_MAX))); }
+  catch(e){ if (!DSS_DB.warned){ DSS_DB.warned = true; rsLog("履歴を保存できません(空き容量が足りません)"); } }
+}
+function rsOnDbErr(err){
+  if (err && !DSS_DB.warned){ DSS_DB.warned = true; rsLog("履歴を保存できません(空き容量が足りません)"); }
 }
 function rsSaveComment(c){
-  const h = rsLoadComments();
-  h.push({ ts: Number(c.ts) || Date.now(), name: String(c.name || ""), text: String(c.text || ""),
-           color: c.color || "", room: Number(c.room) || 0 });
-  while (h.length > RS_KEEP_COMMENTS) h.shift();
-  try { localStorage.setItem(RS_COMMENTS_KEY, JSON.stringify(h)); }
-  catch(e){ if (!rsSaveWarned){ rsSaveWarned = true; rsLog("履歴を保存できません(空き容量が足りません)"); } }
+  const rec = { ts: Number(c.ts) || Date.now(), name: String(c.name || ""), text: String(c.text || ""),
+                color: c.color || "", room: Number(c.room) || 0 };
+  DSS_DB.comments.push(rec);
+  while (DSS_DB.comments.length > RS_COMMENTS_MAX) DSS_DB.comments.shift();
+  if (!DSS_DB.isReady || !DSS_DB.ok){          // 準備できるまでは退避して、あとで流す
+    DSS_DB.pending.push(rec);
+    rsWriteThrough();
+    rsRefreshHistCount();
+    return;
+  }
+  dbAdd("comments", rec, RS_COMMENTS_MAX, (err) => { rsOnDbErr(err); rsRefreshHistCount(); });
 }
 function rsRefreshHistCount(){
-  const n = rsLoadComments().length;
+  const n = DSS_DB.comments.length;
   const el = $("rsHistN"); if (el) el.textContent = String(n);
   const ex = $("rsHistExport"), cl = $("rsHistClear");
   if (ex) ex.disabled = n === 0;
   if (cl) cl.disabled = n === 0;
+}
+// ---- 読み込み(1回だけ) ----
+// 宣言・関数定義より後ろで呼ぶ。ここより前のコードは DSS_DB.comments を読むだけなので安全。
+DSS_DB.ready = (async () => {
+  try {
+    DSS_DB.handle = await dbOpen();
+    const stored = await dbAll("comments");
+    DSS_DB.images = await dbAll("images");
+    const legacy = rsLegacyLoad();
+    const base = stored.length ? stored : legacy;          // 移行の判定に pending を混ぜない
+    DSS_DB.comments = base.concat(DSS_DB.pending).slice(-RS_COMMENTS_MAX);
+    if (!stored.length && legacy.length){                  // 初回だけ移行
+      let allOk = true;
+      for (const c of legacy){
+        await new Promise((ok) => dbAdd("comments", c, RS_COMMENTS_MAX, (e) => { if (e) allOk = false; ok(); }));
+      }
+      if (allOk) { try { localStorage.removeItem(RS_COMMENTS_KEY); } catch(e){} }
+      else rsWriteThrough();
+    }
+    const flush = DSS_DB.pending.splice(0);
+    for (const c of flush) dbAdd("comments", c, RS_COMMENTS_MAX, rsOnDbErr);
+  } catch(e){
+    DSS_DB.ok = false;
+    DSS_DB.comments = rsLegacyLoad().concat(DSS_DB.pending).slice(-RS_COMMENTS_MAX);
+    rsWriteThrough();
+  }
+  DSS_DB.isReady = true;
+  rsRefreshHistCount();
+  rsRenderImgHist();
+})();
+
+function rsClearHistory(){
+  DSS_DB.comments = [];
+  DSS_DB.pending = [];
+  try { localStorage.removeItem(RS_COMMENTS_KEY); } catch(e){}
+  if (DSS_DB.handle) dbClear("comments");
+  rsRefreshHistCount();
 }
 const rsPad2 = (n) => (n < 10 ? "0" : "") + n;
 function rsFmtTs(ts){
@@ -5036,7 +5278,7 @@ const rsMdCell = (v) => String(v)
   .replace(/\|/g, "\\|")
   .replace(/\r?\n/g, " ");
 function rsExportComments(){
-  const h = rsLoadComments();
+  const h = DSS_DB.comments.slice();
   if (!h.length) return;
   const body = h.map((c) => "| " + rsFmtTs(c.ts) + " | " + (c.room ? "#" + c.room : "") + " | " +
                                  rsMdCell(c.name) + " | " + rsMdCell(c.text) + " |");
@@ -5882,7 +6124,12 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.26";
+const CLIENT_VERSION = "v0.7.28";
+
+// ---- 端末のローカルDB(コメント・過去の静止画) ----
+// 画像は localStorage に置けないので IndexedDB を使う。
+// 使えない環境ではコメントだけ従来どおり localStorage、画像の履歴は無効にする。
+/* ローカルDBの入れ物はスクリプトの先頭で作る(下の宣言より前に触られても落ちないように) */
 (function(){
   const o = $("verClient");
   if (o) o.textContent = CLIENT_VERSION;
