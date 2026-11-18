@@ -5838,7 +5838,8 @@ function bcSendComment(){
   const text = $("bcText").value.trim().slice(0, 200);
   if (!text) return;
   if (!rsOn){ rsLog("配信を開始してから送信してください"); return; }
-  const c = { name: T("配信者"), text, color: "#ffd479", icon: "", host: true, ts: Date.now() };
+  // mine: この端末から出した発言。読み上げでは読まない(視聴側と同じ扱い)
+  const c = { name: T("配信者"), text, color: "#ffd479", icon: "", host: true, mine: true, ts: Date.now() };
   rsAddComment(c, 0);
   rsPushHistory(c);
   rsRelayAll(c);
@@ -6118,7 +6119,7 @@ function natShowWarn(why){
 // リモート版は GitHub Pages から配信されるため、サーバー(exe)とは別々に古くなりうる。
 // 不具合報告を受けたとき「どちらが古いのか」を利用者の画面だけで判別できるようにする。
 // サーバー側は起動時の ldflags で埋め込み、開通直後に serverinfo で送ってくる。
-const CLIENT_VERSION = "v0.7.29";
+const CLIENT_VERSION = "v0.7.30";
 
 // ---- 端末のローカルDB(コメント・過去の静止画) ----
 // 画像は localStorage に置けないので IndexedDB を使う。
